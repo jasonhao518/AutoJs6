@@ -60,6 +60,9 @@
     <color name="console_view_error">#C62828</color>
     <color name="console_view_assert">#E254FF</color>
 
+    <color name="console_debug">@color/console_view_debug</color>
+    <color name="console_verbose">@color/console_view_verbose</color>
+
     <!--<color name="floating_console_view_debug">#FFFFFF</color>-->
     <!--<color name="floating_console_view_verbose">#ECEFF1</color>-->
     <!--<color name="floating_console_view_info">#E0F2F1</color>-->
