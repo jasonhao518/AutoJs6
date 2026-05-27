@@ -181,6 +181,9 @@ class MainActivity : BaseActivity(), DelegateHost, HostActivity {
 
         Permissions.registerRequestMultiplePermissionsLauncher(this)
 
+        ensureForegroundServicePreferenceInitialized()
+        keepAppRunningInBackgroundIfEnabled()
+
         WorkingDirectoryUtils.determineIfNeeded()
         ExplorerView.clearViewStates()
 
@@ -202,6 +205,7 @@ class MainActivity : BaseActivity(), DelegateHost, HostActivity {
 
     override fun onStart() {
         super.onStart()
+        keepAppRunningInBackgroundIfEnabled()
         // @Hint by SuperMonster003 on Dec 24, 2025.
         //  ! Avoid binding Shizuku user service on app start.
         //  ! It may spawn root user-service processes repeatedly during IDE "Run" (force-stop + relaunch).
@@ -353,7 +357,21 @@ class MainActivity : BaseActivity(), DelegateHost, HostActivity {
 
     fun beforeExit() {
         mA11yTool.stopService(false)
-        mForeGroundService.stopIfNeeded()
+        if (!Pref.getBoolean(R.string.key_foreground_service, true)) {
+            mForeGroundService.stopIfNeeded()
+        }
+    }
+
+    private fun ensureForegroundServicePreferenceInitialized() {
+        if (!Pref.containsKey(R.string.key_foreground_service)) {
+            Pref.putBoolean(R.string.key_foreground_service, true)
+        }
+    }
+
+    private fun keepAppRunningInBackgroundIfEnabled() {
+        if (Pref.getBoolean(R.string.key_foreground_service, true)) {
+            mForeGroundService.startIfNeeded()
+        }
     }
 
     @Suppress("OVERRIDE_DEPRECATION")

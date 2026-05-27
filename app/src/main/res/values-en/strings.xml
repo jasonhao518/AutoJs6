@@ -911,7 +911,9 @@
     <string name="text_jump_to_line_end">Jump to line end</string>
     <string name="text_jump_to_line_start">Jump to line start</string>
     <string name="text_jump_to_start">Jump to start</string>
+    <string name="text_join_key">Join key</string>
     <string name="text_keep_screen_on_when_in_foreground">Keep screen on when in foreground</string>
+    <string name="text_serial_number">Serial number</string>
     <string name="text_key_alias">Alias</string>
     <string name="text_key_store">Keystore</string>
     <string name="text_key_store_has_been_verified">Keystore has been verified</string>

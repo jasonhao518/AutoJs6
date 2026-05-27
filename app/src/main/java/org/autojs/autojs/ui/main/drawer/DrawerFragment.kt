@@ -67,6 +67,7 @@ import org.autojs.autojs.util.ViewUtils
 import org.autojs.autojs.util.ViewUtils.MODE
 import org.autojs.autojs6.BuildConfig
 import org.autojs.autojs6.R
+import org.autojs.autojs6.databinding.DialogServerModeCredentialsBinding
 import org.autojs.autojs6.databinding.FragmentDrawerBinding
 import org.greenrobot.eventbus.EventBus
 import org.greenrobot.eventbus.Subscribe
@@ -343,6 +344,18 @@ open class DrawerFragment : Fragment() {
                     }
                 }
             setStateDisposable(disposable)
+
+                drawerItem.setAction { holder ->
+                    when (holder.isChecked()) {
+                        true -> {
+                            showServerModeCredentialsDialog(
+                                onConfirm = { drawerItem.toggle(true) },
+                                onCancel = { drawerItem.sync() },
+                            )
+                        }
+                        else -> drawerItem.toggle(false)
+                    }
+                }
 
             setOnConnectionException { e: Throwable ->
                 drawerItem.setCheckedIfNeeded(false)
@@ -727,6 +740,42 @@ open class DrawerFragment : Fragment() {
         drawerStatsDisposables.add(historyDisposable)
     }
 
+    private fun showServerModeCredentialsDialog(
+        onConfirm: () -> Unit,
+        onCancel: () -> Unit,
+    ) {
+        val binding = DialogServerModeCredentialsBinding.inflate(LayoutInflater.from(mContext))
+        var isConfirmed = false
+
+        binding.etServerModeSerialNumber.setText(Pref.getStringOrNull(KEY_SERVER_MODE_SERIAL_NUMBER).orEmpty())
+        binding.etServerModeJoinKey.setText(Pref.getStringOrNull(KEY_SERVER_MODE_JOIN_KEY).orEmpty())
+
+        com.afollestad.materialdialogs.MaterialDialog.Builder(mContext)
+            .title(R.string.text_server_mode)
+            .customView(binding.root, false)
+            .negativeText(R.string.dialog_button_cancel)
+            .negativeColorRes(R.color.dialog_button_default)
+            .onNegative { d, _ ->
+                d.dismiss()
+            }
+            .positiveText(R.string.dialog_button_confirm)
+            .positiveColorRes(R.color.dialog_button_attraction)
+            .onPositive { d, _ ->
+                isConfirmed = true
+                Pref.putString(KEY_SERVER_MODE_SERIAL_NUMBER, binding.etServerModeSerialNumber.text?.toString()?.trim().orEmpty())
+                Pref.putString(KEY_SERVER_MODE_JOIN_KEY, binding.etServerModeJoinKey.text?.toString()?.trim().orEmpty())
+                onConfirm()
+                d.dismiss()
+            }
+            .dismissListener {
+                if (!isConfirmed) {
+                    onCancel()
+                }
+            }
+            .autoDismiss(false)
+            .show()
+    }
+
     private fun configureDrawerWidth() {
         val screenWidthDp = resources.configuration.screenWidthDp
         val targetWidthPx = 288f.coerceIn(
@@ -925,6 +974,9 @@ open class DrawerFragment : Fragment() {
     ).forEach { it.sync() }
 
     companion object {
+
+        private const val KEY_SERVER_MODE_SERIAL_NUMBER = "server_mode_serial_number"
+        private const val KEY_SERVER_MODE_JOIN_KEY = "server_mode_join_key"
 
         class Event {
             interface OnDrawerOpened
