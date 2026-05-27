@@ -484,6 +484,12 @@ android {
                 ).let { arguments(it) }
             }
         }
+
+        externalNativeBuild {
+            cmake {
+                abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
+            }
+        }
     }
 
     flavorDimensions.add(flavorDimension)
@@ -600,6 +606,12 @@ android {
             assets.directories.add("src/main/assets-$flavorNameInrt")
         }
 
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+        }
     }
 
     compileOptions {
