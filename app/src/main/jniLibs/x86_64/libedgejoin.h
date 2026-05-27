@@ -87,7 +87,7 @@ typedef struct { void *data; GoInt len; GoInt cap; } GoSlice;
 extern "C" {
 #endif
 
-extern char* EdgeJoin(char* serialNumber, char* joinKey, char* version, char* name, char* endpoint);
+extern char* EdgeCreateIdentity(char* name);
 extern void EdgeJoinFree(char* ptr);
 
 #ifdef __cplusplus

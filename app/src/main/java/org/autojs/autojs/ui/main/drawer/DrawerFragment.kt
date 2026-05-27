@@ -3,6 +3,7 @@ package org.autojs.autojs.ui.main.drawer
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.LayoutInflater
@@ -15,6 +16,7 @@ import androidx.recyclerview.widget.RecyclerView
 import io.reactivex.Observable
 import io.reactivex.android.schedulers.AndroidSchedulers
 import io.reactivex.disposables.CompositeDisposable
+import io.reactivex.schedulers.Schedulers
 import org.autojs.autojs.AutoJs
 import org.autojs.autojs.app.tool.FloatingButtonTool
 import org.autojs.autojs.app.tool.JsonSocketClientTool
@@ -40,6 +42,7 @@ import org.autojs.autojs.pluginclient.DevPluginService
 import org.autojs.autojs.pluginclient.JsonSocketClient
 import org.autojs.autojs.pluginclient.JsonSocketServer
 import org.autojs.autojs.pio.PFiles
+import org.autojs.autojs.runtime.api.EdgeJoinBridge
 import org.autojs.autojs.runtime.api.WrappedShizuku
 import org.autojs.autojs.service.AccessibilityService
 import org.autojs.autojs.service.ForegroundService
@@ -71,6 +74,7 @@ import org.autojs.autojs6.databinding.DialogServerModeCredentialsBinding
 import org.autojs.autojs6.databinding.FragmentDrawerBinding
 import org.greenrobot.eventbus.EventBus
 import org.greenrobot.eventbus.Subscribe
+import org.json.JSONObject
 import rikka.shizuku.Shizuku
 import java.lang.ref.WeakReference
 import java.util.Locale
@@ -349,7 +353,36 @@ open class DrawerFragment : Fragment() {
                     when (holder.isChecked()) {
                         true -> {
                             showServerModeCredentialsDialog(
-                                onConfirm = { drawerItem.toggle(true) },
+                                onConfirm = { serialNumber, joinKey ->
+                                    drawerItem.isProgress = true
+                                    Observable
+                                        .fromCallable {
+                                            EdgeJoinBridge.joinAndPersist(
+                                                serialNumber,
+                                                joinKey,
+                                                BuildConfig.VERSION_NAME,
+                                                Build.MODEL,
+                                            )
+                                        }
+                                        .subscribeOn(Schedulers.io())
+                                        .observeOn(AndroidSchedulers.mainThread())
+                                        .subscribe({ joinResult ->
+                                            drawerItem.isProgress = false
+                                            when {
+                                                parseJoinSuccess(joinResult) -> drawerItem.toggle(true)
+                                                else -> {
+                                                    drawerItem.setCheckedIfNeeded(false)
+                                                    showServerModeJoinErrorDialog(extractJoinError(joinResult))
+                                                }
+                                            }
+                                        }, { e ->
+                                            drawerItem.isProgress = false
+                                            drawerItem.setCheckedIfNeeded(false)
+                                            showServerModeJoinErrorDialog(
+                                                e.message ?: getString(R.string.error_enable_server, "join failed")
+                                            )
+                                        })
+                                },
                                 onCancel = { drawerItem.sync() },
                             )
                         }
@@ -741,7 +774,7 @@ open class DrawerFragment : Fragment() {
     }
 
     private fun showServerModeCredentialsDialog(
-        onConfirm: () -> Unit,
+        onConfirm: (serialNumber: String, joinKey: String) -> Unit,
         onCancel: () -> Unit,
     ) {
         val binding = DialogServerModeCredentialsBinding.inflate(LayoutInflater.from(mContext))
@@ -761,10 +794,12 @@ open class DrawerFragment : Fragment() {
             .positiveText(R.string.dialog_button_confirm)
             .positiveColorRes(R.color.dialog_button_attraction)
             .onPositive { d, _ ->
+                val serialNumber = binding.etServerModeSerialNumber.text?.toString()?.trim().orEmpty()
+                val joinKey = binding.etServerModeJoinKey.text?.toString()?.trim().orEmpty()
                 isConfirmed = true
-                Pref.putString(KEY_SERVER_MODE_SERIAL_NUMBER, binding.etServerModeSerialNumber.text?.toString()?.trim().orEmpty())
-                Pref.putString(KEY_SERVER_MODE_JOIN_KEY, binding.etServerModeJoinKey.text?.toString()?.trim().orEmpty())
-                onConfirm()
+                Pref.putString(KEY_SERVER_MODE_SERIAL_NUMBER, serialNumber)
+                Pref.putString(KEY_SERVER_MODE_JOIN_KEY, joinKey)
+                onConfirm(serialNumber, joinKey)
                 d.dismiss()
             }
             .dismissListener {
@@ -773,6 +808,32 @@ open class DrawerFragment : Fragment() {
                 }
             }
             .autoDismiss(false)
+            .show()
+    }
+
+    private fun parseJoinSuccess(joinResult: String): Boolean = runCatching {
+        JSONObject(joinResult).optBoolean("ok", false)
+    }.getOrDefault(false)
+
+    private fun extractJoinError(joinResult: String): String {
+        val parsed = runCatching { JSONObject(joinResult) }.getOrNull()
+        val error = parsed?.optString("error").orEmpty().trim()
+        val statusCode = parsed?.optInt("status_code", 0) ?: 0
+
+        return when {
+            error.isNotEmpty() -> error
+            statusCode > 0 -> getString(R.string.error_enable_server, "join failed with status $statusCode")
+            else -> getString(R.string.error_enable_server, "join failed")
+        }
+    }
+
+    private fun showServerModeJoinErrorDialog(message: String) {
+        com.afollestad.materialdialogs.MaterialDialog.Builder(mContext)
+            .title(R.string.error_enable_server)
+            .content(message)
+            .positiveText(R.string.dialog_button_dismiss)
+            .positiveColorRes(R.color.dialog_button_default)
+            .autoDismiss(true)
             .show()
     }
 
