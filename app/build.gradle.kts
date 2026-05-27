@@ -539,8 +539,6 @@ android {
 
             // @Reference to kkevsekk1/AutoX (https://github.com/kkevsekk1/AutoX) by SuperMonster003 on Nov 16, 2023.
             //  ! https://github.com/kkevsekk1/AutoX/blob/a6d482189291b460c3be60970b74c5321d26e457/inrt/build.gradle.kts#L93
-            // noinspection ChromeOsAbiSupport
-            ndk.abiFilters += ""
         }
 
         androidResources {
@@ -726,7 +724,7 @@ android {
             // Resets the list of ABIs that Gradle should create APKs for to none.
             reset()
             // Specifies a list of ABIs that Gradle should create APKs for.
-            include("arm64-v8a", "x86_64", "armeabi-v7a", "x86", "armeabi")
+            include("arm64-v8a", "x86_64", "armeabi-v7a", "x86")
             // Specifies that we do not want to also generate a universal APK that includes all ABIs.
             isUniversalApk = true
         }
