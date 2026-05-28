@@ -43,10 +43,23 @@ public final class EdgeJoinBridge {
     }
 
     private static native String nativeCreateIdentity(String name);
+    private static native String nativeStartClient(String configJson);
+    private static native String nativeStopClient();
 
     public static String createIdentity(String name) {
         Log.d(TAG, "createIdentity: requested with name=" + safeValue(sanitizeName(name)));
         return nativeCreateIdentity(sanitizeName(name));
+    }
+
+    public static String startClientFromStoredConfig() {
+        String configJson = loadStoredConfig();
+        Log.d(TAG, "startClientFromStoredConfig: configLen=" + configJson.length());
+        return nativeStartClient(configJson);
+    }
+
+    public static String stopClient() {
+        Log.d(TAG, "stopClient: requested");
+        return nativeStopClient();
     }
 
     public static String joinAndPersist(String serialNumber, String joinKey, String version, String name) {
@@ -176,6 +189,14 @@ public final class EdgeJoinBridge {
         String config = preferences.getString(KEY_CONFIG, "");
         Log.d(TAG, "loadStoredConfig: loaded configLen=" + (config == null ? 0 : config.length()));
         return config;
+    }
+
+    public static String loadStoredPeerId() {
+        Context context = GlobalAppContext.get();
+        SharedPreferences preferences = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
+        String peerId = preferences.getString(KEY_PEER_ID, "");
+        Log.d(TAG, "loadStoredPeerId: loaded peerId=" + safeValue(peerId));
+        return peerId == null ? "" : peerId;
     }
 
     private static void saveToPreferences(

@@ -88,6 +88,8 @@ extern "C" {
 #endif
 
 extern char* EdgeCreateIdentity(char* name);
+extern char* EdgeStartClient(char* configJSON);
+extern char* EdgeStopClient(void);
 extern void EdgeJoinFree(char* ptr);
 
 #ifdef __cplusplus

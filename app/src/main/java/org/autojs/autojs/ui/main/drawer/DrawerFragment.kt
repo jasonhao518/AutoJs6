@@ -63,7 +63,6 @@ import org.autojs.autojs.util.DisplayUtils
 import org.autojs.autojs.util.IntentUtils.App.exit
 import org.autojs.autojs.util.IntentUtils.App.restart
 import org.autojs.autojs.util.IntentUtils.startSafely
-import org.autojs.autojs.util.NetworkUtils
 import org.autojs.autojs.util.NotificationUtils
 import org.autojs.autojs.util.RomUtils
 import org.autojs.autojs.util.ViewUtils
@@ -332,12 +331,24 @@ open class DrawerFragment : Fragment() {
                 }
                 .observeOn(AndroidSchedulers.mainThread())
                 .subscribe { (state, count) ->
+                    if (state.isDisconnected()) {
+                        Observable
+                            .fromCallable { EdgeJoinBridge.stopClient() }
+                            .subscribeOn(Schedulers.io())
+                            .subscribe({}, {})
+                    } else {
+                        Observable
+                            .fromCallable { EdgeJoinBridge.startClientFromStoredConfig() }
+                            .subscribeOn(Schedulers.io())
+                            .subscribe({}, {})
+                    }
+
                     drawerItem.subtitle = when {
                         state.isDisconnected() -> null
-                        else -> NetworkUtils.getIpAddress().let { ip ->
+                        else -> EdgeJoinBridge.loadStoredPeerId().let { peerId ->
                             when {
-                                count > 0 -> "$ip  [ ${this.context.getString(R.string.text_connected_count_with_colon, count)} ]"
-                                else -> ip
+                                count > 0 -> "$peerId  [ ${this.context.getString(R.string.text_connected_count_with_colon, count)} ]"
+                                else -> peerId
                             }
                         }
                     }
