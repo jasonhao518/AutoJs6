@@ -58,6 +58,9 @@
 -keep class com.stardust.autojs.** { *; }
 -dontwarn com.stardust.**
 
+# Keep scrcpy server entry class name for app_process classpath launch.
+-keep class com.genymobile.scrcpy.Server { *; }
+
 -keepattributes *Annotation*,SourceFile,LineNumberTable
 
 -keepclassmembers class ** {

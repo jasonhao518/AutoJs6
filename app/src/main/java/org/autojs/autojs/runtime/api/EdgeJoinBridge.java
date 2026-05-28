@@ -11,7 +11,6 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
 
 import okhttp3.MediaType;
@@ -34,10 +33,8 @@ public final class EdgeJoinBridge {
     private static final String KEY_JOIN_RESPONSE = "join_response";
     private static final String KEY_JOIN_KEY = "join_key";
     private static final String KEY_SERIAL_NUMBER = "serial_number";
-    private static final String SCRCPY_ASSET_PATH = "scrcpy/scrcpy-server.jar";
-    private static final String SCRCPY_LOCAL_NAME = "scrcpy-server.jar";
-    private static final String SCRCPY_REMOTE_PATH = "/data/local/tmp/scrcpy-server.jar";
-    private static final int SCRCPY_PORT = 8886;
+    private static final String SCRCPY_APP_LOG_NAME = "scrcpy-server.log";
+    private static final int SCRCPY_LOG_TAIL_LINES = 120;
 
     private static final Object SCRCPY_BOOTSTRAP_LOCK = new Object();
     private static volatile boolean sScrcpyBootstrapped = false;
@@ -62,72 +59,112 @@ public final class EdgeJoinBridge {
     }
 
     public static String startClientFromStoredConfig() {
-        ensureScrcpyServerForRelay();
+        ensureScrcpyServerForRelayAsync();
         String configJson = loadStoredConfig();
         Log.d(TAG, "startClientFromStoredConfig: configLen=" + configJson.length());
         return nativeStartClient(configJson);
+    }
+
+    public static void ensureScrcpyServerForRelayAsync() {
+        if (sScrcpyBootstrapped) {
+            return;
+        }
+        Thread bootstrapThread = new Thread(() -> {
+            try {
+                ensureScrcpyServerForRelay();
+            } catch (Throwable t) {
+                Log.w(TAG, "ensureScrcpyServerForRelayAsync: bootstrap failed", t);
+            }
+        }, "edgejoin-scrcpy-bootstrap");
+        bootstrapThread.setDaemon(true);
+        bootstrapThread.start();
     }
 
     public static void ensureScrcpyServerForRelay() {
         if (sScrcpyBootstrapped) {
             return;
         }
-        synchronized (SCRCPY_BOOTSTRAP_LOCK) {
-            if (sScrcpyBootstrapped) {
-                return;
-            }
-            Context context = GlobalAppContext.get();
-            if (context == null) {
-                Log.w(TAG, "ensureScrcpyServerForRelay: context is null");
-                return;
-            }
-
-            boolean hasLocalJar = false;
-            File localJar = new File(context.getFilesDir(), SCRCPY_LOCAL_NAME);
-            try {
-                try (java.io.InputStream input = context.getAssets().open(SCRCPY_ASSET_PATH);
-                     FileOutputStream output = new FileOutputStream(localJar)) {
-                    byte[] buffer = new byte[8192];
-                    int read;
-                    while ((read = input.read(buffer)) != -1) {
-                        output.write(buffer, 0, read);
-                    }
+        try {
+            synchronized (SCRCPY_BOOTSTRAP_LOCK) {
+                if (sScrcpyBootstrapped) {
+                    return;
                 }
-                hasLocalJar = true;
-            } catch (IOException e) {
-                Log.w(TAG, "ensureScrcpyServerForRelay: asset not found, will use existing remote jar if available", e);
+                Context context = GlobalAppContext.get();
+                if (context == null) {
+                    Log.w(TAG, "ensureScrcpyServerForRelay: context is null");
+                    return;
+                }
+
+                File appLogFile = new File(context.getFilesDir(), SCRCPY_APP_LOG_NAME);
+
+                String appJarPath = context.getPackageCodePath();
+                String appLogPath = appLogFile.getAbsolutePath();
+                String appStartCmd = buildScrcpyStartCommand(appJarPath, appLogPath);
+                Log.i(TAG, "ensureScrcpyServerForRelay: starting scrcpy from apk classpath=" + appJarPath);
+                ProcessShell.Result result = ProcessShell.execCommand(new String[]{
+                        "rm -f " + appLogPath,
+                        appStartCmd,
+                }, false);
+
+                if (result.code == 0) {
+                    sScrcpyBootstrapped = true;
+                    Log.i(TAG, "ensureScrcpyServerForRelay: started");
+                    dumpScrcpyServerLog("post-start", appLogPath);
+                } else {
+                    Log.w(
+                            TAG,
+                            "ensureScrcpyServerForRelay: bootstrap failed code=" + result.code
+                                    + ", error=" + safeValue(result.error)
+                    );
+                    dumpScrcpyServerLog("bootstrap-failed", appLogPath);
+                }
             }
+        } catch (Throwable t) {
+            Log.w(TAG, "ensureScrcpyServerForRelay: bootstrap failed unexpectedly", t);
+        }
+    }
 
-            String startCmd =
-                    "CLASSPATH=" + SCRCPY_REMOTE_PATH
-                            + " app_process / com.genymobile.scrcpy.Server 1.19-ws5 web ERROR "
-                            + SCRCPY_PORT
-                            + " true >/dev/null 2>&1 &";
+    private static String buildScrcpyStartCommand(String jarPath, String logPath) {
+        return "CLASSPATH=" + jarPath
+            + " app_process / com.genymobile.scrcpy.Server 1.19-ws5"
+            + " log_level=error"
+            + " tunnel_forward=true"
+            + " audio=false"
+            + " >>" + logPath + " 2>&1 &";
+    }
 
-            ProcessShell.Result result;
-            if (hasLocalJar) {
-                result = ProcessShell.execCommand(new String[]{
-                        "cp '" + localJar.getAbsolutePath() + "' " + SCRCPY_REMOTE_PATH,
-                        "chmod 644 " + SCRCPY_REMOTE_PATH,
-                        startCmd,
-                }, true);
-            } else {
-                result = ProcessShell.execCommand(new String[]{
-                        "test -f " + SCRCPY_REMOTE_PATH,
-                        startCmd,
-                }, true);
-            }
+    private static void dumpScrcpyServerLog(String reason, String appLogPath) {
+        try {
+            ProcessShell.Result logResult = ProcessShell.execCommand(new String[]{
+                    "test -f " + appLogPath,
+                    "tail -n " + SCRCPY_LOG_TAIL_LINES + " " + appLogPath,
+            }, false);
+            String logPath = appLogPath;
 
-            if (result.code == 0) {
-                sScrcpyBootstrapped = true;
-                Log.i(TAG, "ensureScrcpyServerForRelay: started on port " + SCRCPY_PORT);
-            } else {
+            if (logResult.code != 0) {
                 Log.w(
                         TAG,
-                        "ensureScrcpyServerForRelay: bootstrap failed code=" + result.code
-                                + ", error=" + safeValue(result.error)
+                        "dumpScrcpyServerLog: no log output reason=" + safeValue(reason)
+                                + ", code=" + logResult.code
+                                + ", error=" + safeValue(logResult.error)
                 );
+                return;
             }
+
+            String logs = safeValue(logResult.result).trim();
+            if (logs.isEmpty()) {
+                Log.i(TAG, "dumpScrcpyServerLog: empty log reason=" + safeValue(reason));
+                return;
+            }
+
+            Log.i(
+                    TAG,
+                    "dumpScrcpyServerLog: reason=" + safeValue(reason)
+                            + ", path=" + logPath
+                            + "\n" + logs
+            );
+        } catch (Throwable t) {
+            Log.w(TAG, "dumpScrcpyServerLog: failed reason=" + safeValue(reason), t);
         }
     }
 
