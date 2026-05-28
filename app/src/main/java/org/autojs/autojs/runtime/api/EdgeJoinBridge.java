@@ -6,9 +6,12 @@ import android.os.Build;
 import android.util.Log;
 
 import org.autojs.autojs.app.GlobalAppContext;
+import com.stardust.autojs.core.util.ProcessShell;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 
 import okhttp3.MediaType;
@@ -31,6 +34,13 @@ public final class EdgeJoinBridge {
     private static final String KEY_JOIN_RESPONSE = "join_response";
     private static final String KEY_JOIN_KEY = "join_key";
     private static final String KEY_SERIAL_NUMBER = "serial_number";
+    private static final String SCRCPY_ASSET_PATH = "scrcpy/scrcpy-server.jar";
+    private static final String SCRCPY_LOCAL_NAME = "scrcpy-server.jar";
+    private static final String SCRCPY_REMOTE_PATH = "/data/local/tmp/scrcpy-server.jar";
+    private static final int SCRCPY_PORT = 8886;
+
+    private static final Object SCRCPY_BOOTSTRAP_LOCK = new Object();
+    private static volatile boolean sScrcpyBootstrapped = false;
 
     private static final MediaType JSON_MEDIA_TYPE = MediaType.parse("application/json; charset=utf-8");
     private static final OkHttpClient HTTP_CLIENT = new OkHttpClient();
@@ -52,9 +62,73 @@ public final class EdgeJoinBridge {
     }
 
     public static String startClientFromStoredConfig() {
+        ensureScrcpyServerForRelay();
         String configJson = loadStoredConfig();
         Log.d(TAG, "startClientFromStoredConfig: configLen=" + configJson.length());
         return nativeStartClient(configJson);
+    }
+
+    public static void ensureScrcpyServerForRelay() {
+        if (sScrcpyBootstrapped) {
+            return;
+        }
+        synchronized (SCRCPY_BOOTSTRAP_LOCK) {
+            if (sScrcpyBootstrapped) {
+                return;
+            }
+            Context context = GlobalAppContext.get();
+            if (context == null) {
+                Log.w(TAG, "ensureScrcpyServerForRelay: context is null");
+                return;
+            }
+
+            boolean hasLocalJar = false;
+            File localJar = new File(context.getFilesDir(), SCRCPY_LOCAL_NAME);
+            try {
+                try (java.io.InputStream input = context.getAssets().open(SCRCPY_ASSET_PATH);
+                     FileOutputStream output = new FileOutputStream(localJar)) {
+                    byte[] buffer = new byte[8192];
+                    int read;
+                    while ((read = input.read(buffer)) != -1) {
+                        output.write(buffer, 0, read);
+                    }
+                }
+                hasLocalJar = true;
+            } catch (IOException e) {
+                Log.w(TAG, "ensureScrcpyServerForRelay: asset not found, will use existing remote jar if available", e);
+            }
+
+            String startCmd =
+                    "CLASSPATH=" + SCRCPY_REMOTE_PATH
+                            + " app_process / com.genymobile.scrcpy.Server 1.19-ws5 web ERROR "
+                            + SCRCPY_PORT
+                            + " true >/dev/null 2>&1 &";
+
+            ProcessShell.Result result;
+            if (hasLocalJar) {
+                result = ProcessShell.execCommand(new String[]{
+                        "cp '" + localJar.getAbsolutePath() + "' " + SCRCPY_REMOTE_PATH,
+                        "chmod 644 " + SCRCPY_REMOTE_PATH,
+                        startCmd,
+                }, true);
+            } else {
+                result = ProcessShell.execCommand(new String[]{
+                        "test -f " + SCRCPY_REMOTE_PATH,
+                        startCmd,
+                }, true);
+            }
+
+            if (result.code == 0) {
+                sScrcpyBootstrapped = true;
+                Log.i(TAG, "ensureScrcpyServerForRelay: started on port " + SCRCPY_PORT);
+            } else {
+                Log.w(
+                        TAG,
+                        "ensureScrcpyServerForRelay: bootstrap failed code=" + result.code
+                                + ", error=" + safeValue(result.error)
+                );
+            }
+        }
     }
 
     public static String stopClient() {

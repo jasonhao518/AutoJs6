@@ -17,6 +17,7 @@ import com.bumptech.glide.request.transition.Transition
 import com.google.mlkit.common.sdkinternal.MlKitContext
 import com.hjq.toast.Toaster
 import io.reactivex.android.schedulers.AndroidSchedulers
+import io.reactivex.schedulers.Schedulers
 import org.autojs.autojs.app.GlobalAppContext
 import org.autojs.autojs.core.pref.Pref
 import org.autojs.autojs.inrt.Pref as InrtPref
@@ -32,6 +33,8 @@ import org.autojs.autojs.storage.history.HistoryCleanupScheduler
 import org.autojs.autojs.theme.ThemeColorManager
 import org.autojs.autojs.timing.TimedTaskManager
 import org.autojs.autojs.timing.TimedTaskScheduler
+import org.autojs.autojs.pluginclient.JsonSocketServer
+import org.autojs.autojs.runtime.api.EdgeJoinBridge
 import org.autojs.autojs.tool.CrashHandler
 import org.autojs.autojs.ui.error.CrashReportActivity
 import org.autojs.autojs.ui.floating.FloatyWindowManger
@@ -72,6 +75,7 @@ class App : MultiDexApplication() {
                 setUpLeakCanary()
 
                 AutoJs.initInstance(this)
+                autoStartServerModeIfEnabled()
                 GlobalKeyObserver.initIfNeeded(applicationContext)
                 setupDrawableImageLoader()
                 TimedTaskScheduler.init(this)
@@ -118,6 +122,31 @@ class App : MultiDexApplication() {
                 else -> ViewUtils.MODE.NULL
             }
         )
+    }
+
+    @SuppressLint("CheckResult")
+    private fun autoStartServerModeIfEnabled() {
+        if (JsonSocketServer.isServerSocketNormallyClosed) {
+            return
+        }
+
+        AutoJs.instance.devPluginService
+            .enableLocalServer()
+            .subscribeOn(Schedulers.io())
+            .subscribe({}, { e ->
+                Log.w("App", "autoStartServerModeIfEnabled: failed to enable server", e)
+            })
+
+        val configJson = EdgeJoinBridge.loadStoredConfig()
+        if (configJson.isBlank()) {
+            return
+        }
+        io.reactivex.Observable
+            .fromCallable { EdgeJoinBridge.startClientFromStoredConfig() }
+            .subscribeOn(Schedulers.io())
+            .subscribe({}, { e ->
+                Log.w("App", "autoStartServerModeIfEnabled: failed to start edgejoin client", e)
+            })
     }
 
     @SuppressLint("CheckResult")

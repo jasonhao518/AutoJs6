@@ -1,6 +1,7 @@
 package org.autojs.autojs.pluginclient
 
 import android.content.Context
+import android.util.Log
 import androidx.annotation.AnyThread
 import io.reactivex.Observable
 import io.reactivex.schedulers.Schedulers
@@ -8,6 +9,7 @@ import io.reactivex.subjects.BehaviorSubject
 import io.reactivex.subjects.Subject
 import org.autojs.autojs.annotation.ScriptInterface
 import org.autojs.autojs.core.pref.Pref
+import org.autojs.autojs.runtime.api.EdgeJoinBridge
 import org.autojs.autojs.pluginclient.JsonSocket.HANDSHAKE_TIMEOUT
 import org.autojs.autojs.runtime.ScriptRuntime
 import org.autojs.autojs.util.ThreadUtils
@@ -232,6 +234,10 @@ class DevPluginService(val context: Context) {
         return Observable
             .create<JsonSocketServer> { emitter ->
 
+                // Best-effort bootstrap for ws-scrcpy relay endpoint.
+                // zh-CN: 为 ws-scrcpy 中继端点进行尽力初始化.
+                EdgeJoinBridge.ensureScrcpyServerForRelay()
+
                 // Ensure only one accept loop runs at the same time.
                 // zh-CN: 确保同一时间只有一个 accept 循环在运行.
                 if (!mEnableLocalServerStarted.compareAndSet(false, true)) {
@@ -309,6 +315,8 @@ class DevPluginService(val context: Context) {
     }
 
     companion object {
+
+        private const val TAG = "DevPluginService"
 
         const val TYPE_HELLO = "hello"
         const val TYPE_COMMAND = "command"
