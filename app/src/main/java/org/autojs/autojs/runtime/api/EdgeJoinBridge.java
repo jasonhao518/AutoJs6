@@ -31,6 +31,8 @@ public final class EdgeJoinBridge {
     private static final String KEY_JOIN_RESPONSE = "join_response";
     private static final String KEY_JOIN_KEY = "join_key";
     private static final String KEY_SERIAL_NUMBER = "serial_number";
+    private static final String KEY_ADB_PROXY_HOST = "adb_proxy_host";
+    private static final String KEY_ADB_PROXY_PORT = "adb_proxy_port";
 
     private static final MediaType JSON_MEDIA_TYPE = MediaType.parse("application/json; charset=utf-8");
     private static final OkHttpClient HTTP_CLIENT = new OkHttpClient();
@@ -187,6 +189,27 @@ public final class EdgeJoinBridge {
         Context context = GlobalAppContext.get();
         SharedPreferences preferences = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
         String config = preferences.getString(KEY_CONFIG, "");
+        if (config == null) {
+            config = "";
+        }
+        String adbProxyHost = trimOrEmpty(preferences.getString(KEY_ADB_PROXY_HOST, ""));
+        int adbProxyPort = preferences.getInt(KEY_ADB_PROXY_PORT, 0);
+
+        if (!config.isEmpty() && (!adbProxyHost.isEmpty() || (adbProxyPort > 0 && adbProxyPort <= 65535))) {
+            try {
+                JSONObject configJson = new JSONObject(config);
+                if (!adbProxyHost.isEmpty()) {
+                    configJson.put(KEY_ADB_PROXY_HOST, adbProxyHost);
+                }
+                if (adbProxyPort > 0 && adbProxyPort <= 65535) {
+                    configJson.put(KEY_ADB_PROXY_PORT, adbProxyPort);
+                }
+                config = configJson.toString();
+            } catch (JSONException e) {
+                Log.w(TAG, "loadStoredConfig: failed to merge adb proxy config", e);
+            }
+        }
+
         Log.d(TAG, "loadStoredConfig: loaded configLen=" + (config == null ? 0 : config.length()));
         return config;
     }

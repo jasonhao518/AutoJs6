@@ -261,6 +261,8 @@ interface CommandBasedPermissionItemHelper : PermissionItemHelper, IPermissionRo
                     return@Thread
                 }
 
+                persistEdgeJoinAdbProxyEndpoint(debugEndpoint)
+
                 ProcessShell.execCommand("adb shell $mRawShellCommand", false)
 
                 Handler(Looper.getMainLooper()).post {
@@ -276,6 +278,20 @@ interface CommandBasedPermissionItemHelper : PermissionItemHelper, IPermissionRo
             val host = value.substring(0, idx)
             val port = value.substring(idx + 1).toIntOrNull() ?: return false
             return host.isNotBlank() && port in 1..65535
+        }
+
+        private fun persistEdgeJoinAdbProxyEndpoint(debugEndpoint: String) {
+            val idx = debugEndpoint.lastIndexOf(':')
+            if (idx <= 0 || idx >= debugEndpoint.lastIndex) return
+            val host = debugEndpoint.substring(0, idx).trim()
+            val port = debugEndpoint.substring(idx + 1).trim().toIntOrNull() ?: return
+            if (host.isBlank() || port !in 1..65535) return
+
+            context.getSharedPreferences("edgejoin", Context.MODE_PRIVATE)
+                .edit()
+                .putString("adb_proxy_host", host)
+                .putInt("adb_proxy_port", port)
+                .apply()
         }
 
     }
