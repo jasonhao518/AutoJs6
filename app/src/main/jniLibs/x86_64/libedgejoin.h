@@ -24,6 +24,18 @@ extern const char *_GoStringPtr(_GoString_ s);
 #line 3 "edgejoin.go"
 
 #include <stdlib.h>
+#ifdef __ANDROID__
+#include <android/log.h>
+static void edgejoin_log_write(int prio, const char* tag, const char* text) {
+	__android_log_write(prio, tag, text);
+}
+#else
+static void edgejoin_log_write(int prio, const char* tag, const char* text) {
+	(void)prio;
+	(void)tag;
+	(void)text;
+}
+#endif
 
 #line 1 "cgo-generated-wrapper"
 

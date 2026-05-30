@@ -6,16 +6,8 @@ import android.os.Build;
 import android.util.Log;
 
 import org.autojs.autojs.app.GlobalAppContext;
-import com.stardust.autojs.core.util.ProcessShell;
 import org.json.JSONException;
 import org.json.JSONObject;
-
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
-import java.util.List;
 
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
@@ -28,7 +20,6 @@ public final class EdgeJoinBridge {
 
     private static final String TAG = "EdgeJoinBridge";
 
-    private static volatile Process sScrcpyProcess;
     private static final String DEFAULT_ENDPOINT = "https://www.edgez.ai/api/join";
     private static final String PREF_NAME = "edgejoin";
     private static final String KEY_CONFIG = "config";
@@ -38,11 +29,6 @@ public final class EdgeJoinBridge {
     private static final String KEY_JOIN_RESPONSE = "join_response";
     private static final String KEY_JOIN_KEY = "join_key";
     private static final String KEY_SERIAL_NUMBER = "serial_number";
-    private static final String SCRCPY_LOGCAT_TAG = "ScrcpyServer";
-    private static final String SCRCPY_TUNNEL_PORT_HEX = "22B6";
-
-    private static final Object SCRCPY_BOOTSTRAP_LOCK = new Object();
-    private static volatile boolean sScrcpyBootstrapped = false;
 
     private static final MediaType JSON_MEDIA_TYPE = MediaType.parse("application/json; charset=utf-8");
     private static final OkHttpClient HTTP_CLIENT = new OkHttpClient();
@@ -64,145 +50,9 @@ public final class EdgeJoinBridge {
     }
 
     public static String startClientFromStoredConfig() {
-        ensureScrcpyServerForRelayAsync();
         String configJson = loadStoredConfig();
         Log.d(TAG, "startClientFromStoredConfig: configLen=" + configJson.length());
         return nativeStartClient(configJson);
-    }
-
-    public static void ensureScrcpyServerForRelayAsync() {
-        if (sScrcpyBootstrapped) {
-            return;
-        }
-        Thread bootstrapThread = new Thread(() -> {
-            try {
-                ensureScrcpyServerForRelay();
-            } catch (Throwable t) {
-                Log.w(TAG, "ensureScrcpyServerForRelayAsync: bootstrap failed", t);
-            }
-        }, "edgejoin-scrcpy-bootstrap");
-        bootstrapThread.setDaemon(true);
-        bootstrapThread.start();
-    }
-
-    public static void ensureScrcpyServerForRelay() {
-        if (sScrcpyBootstrapped) {
-            return;
-        }
-        boolean shouldProbePort = false;
-        try {
-            synchronized (SCRCPY_BOOTSTRAP_LOCK) {
-                if (sScrcpyBootstrapped) {
-                    return;
-                }
-                Context context = GlobalAppContext.get();
-                if (context == null) {
-                    Log.w(TAG, "ensureScrcpyServerForRelay: context is null");
-                    return;
-                }
-
-                String appJarPath = context.getPackageCodePath();
-                Process existing = sScrcpyProcess;
-                if (existing != null && existing.isAlive()) {
-                    sScrcpyBootstrapped = true;
-                    Log.i(TAG, "ensureScrcpyServerForRelay: scrcpy already running");
-                    shouldProbePort = true;
-                    return;
-                }
-
-                Log.i(TAG, "ensureScrcpyServerForRelay: starting scrcpy from apk classpath=" + appJarPath);
-                Process process = startScrcpyServerProcess(appJarPath);
-                sScrcpyProcess = process;
-
-                Thread.sleep(250L);
-                if (!process.isAlive()) {
-                    int exitCode = process.exitValue();
-                    sScrcpyProcess = null;
-                    sScrcpyBootstrapped = false;
-                    Log.w(TAG, "ensureScrcpyServerForRelay: scrcpy exited early code=" + exitCode);
-                    return;
-                }
-
-                sScrcpyBootstrapped = true;
-                Log.i(TAG, "ensureScrcpyServerForRelay: started");
-                shouldProbePort = true;
-            }
-
-            if (shouldProbePort) {
-                probeScrcpyTunnelPort();
-            }
-        } catch (Throwable t) {
-            Log.w(TAG, "ensureScrcpyServerForRelay: bootstrap failed unexpectedly", t);
-        }
-    }
-
-    private static Process startScrcpyServerProcess(String jarPath) throws IOException {
-        List<String> command = Arrays.asList(
-                "app_process",
-                "/",
-                "com.genymobile.scrcpy.Server",
-                "1.19-ws5",
-                "log_level=info",
-                "tunnel_forward=true",
-                "audio=false"
-        );
-
-        ProcessBuilder builder = new ProcessBuilder(command);
-        builder.environment().put("CLASSPATH", jarPath);
-        builder.redirectErrorStream(true);
-        Process process = builder.start();
-
-        Thread outputReader = new Thread(() -> {
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    Log.i(SCRCPY_LOGCAT_TAG, line);
-                }
-            } catch (IOException e) {
-                Log.w(TAG, "startScrcpyServerProcess: output reader failed", e);
-            }
-        }, "scrcpy-server-log-reader");
-        outputReader.setDaemon(true);
-        outputReader.start();
-
-        Thread exitWatcher = new Thread(() -> {
-            try {
-                int exitCode = process.waitFor();
-                Log.w(SCRCPY_LOGCAT_TAG, "__SCRCPY_EXIT__:" + exitCode);
-                sScrcpyBootstrapped = false;
-                if (sScrcpyProcess == process) {
-                    sScrcpyProcess = null;
-                }
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-        }, "scrcpy-server-exit-watcher");
-        exitWatcher.setDaemon(true);
-        exitWatcher.start();
-
-        return process;
-    }
-
-    private static void probeScrcpyTunnelPort() {
-        try {
-            ProcessShell.Result probeResult = ProcessShell.execCommand(new String[]{
-                    "sleep 1",
-                    "cat /proc/net/tcp /proc/net/tcp6 2>/dev/null | grep -i ':" + SCRCPY_TUNNEL_PORT_HEX + " '",
-            }, false);
-
-            if (probeResult.code == 0) {
-                Log.i(TAG, "probeScrcpyTunnelPort: 8886 is listening");
-            } else {
-                Log.w(
-                        TAG,
-                        "probeScrcpyTunnelPort: 8886 not listening"
-                                + ", stdout=" + safeValue(probeResult.result)
-                                + ", stderr=" + safeValue(probeResult.error)
-                );
-            }
-        } catch (Throwable t) {
-            Log.w(TAG, "probeScrcpyTunnelPort: failed", t);
-        }
     }
 
     public static String stopClient() {

@@ -145,6 +145,9 @@ open class DrawerFragment : Fragment() {
     private lateinit var mAboutAppAndDevItem: DrawerMenuShortcutItem
 
     private lateinit var mA11yTool: AccessibilityTool
+    private val projectMediaAutoRequestLock = Any()
+    @Volatile
+    private var hasAutoRequestedProjectMediaForServerMode = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -338,7 +341,15 @@ open class DrawerFragment : Fragment() {
                             .subscribe({}, {})
                     } else {
                         Observable
-                            .fromCallable { EdgeJoinBridge.startClientFromStoredConfig() }
+                            .fromCallable {
+                                synchronized(projectMediaAutoRequestLock) {
+                                    if (!hasAutoRequestedProjectMediaForServerMode) {
+                                        hasAutoRequestedProjectMediaForServerMode = true
+                                        MediaProjectionPermission(mContext).requestIfNeeded()
+                                    }
+                                }
+                                EdgeJoinBridge.startClientFromStoredConfig()
+                            }
                             .subscribeOn(Schedulers.io())
                             .subscribe({}, {})
                     }

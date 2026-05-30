@@ -234,10 +234,6 @@ class DevPluginService(val context: Context) {
         return Observable
             .create<JsonSocketServer> { emitter ->
 
-                // Best-effort bootstrap for ws-scrcpy relay endpoint.
-                // zh-CN: 为 ws-scrcpy 中继端点进行尽力初始化.
-                EdgeJoinBridge.ensureScrcpyServerForRelayAsync()
-
                 // Ensure only one accept loop runs at the same time.
                 // zh-CN: 确保同一时间只有一个 accept 循环在运行.
                 if (!mEnableLocalServerStarted.compareAndSet(false, true)) {

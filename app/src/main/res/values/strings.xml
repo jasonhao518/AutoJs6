@@ -483,6 +483,9 @@
     <string name="error_abandoned_method">Method %s has been abandoned and should not be used</string>
     <string name="error_action_cannot_be_completed_with_negative_coordinate">The \"%1$s\" operation cannot be completed because the parameter contains negative coordinate values (%2$d, %3$d)</string>
     <string name="error_activity_is_required_for_ui_exec_mode">An activity is required, which could be provided by running in \"ui\" execution mode</string>
+    <string name="error_adb_client_unavailable">No adb client available in current runtime</string>
+    <string name="error_adb_connect_failed">Wireless connect failed</string>
+    <string name="error_adb_pair_failed">Wireless pair failed</string>
     <string name="error_an_error_occurred">An error occurred</string>
     <string name="error_an_operation_is_not_implemented">An operation is not implemented</string>
     <string name="error_app_not_installed">App is not installed</string>
@@ -490,6 +493,8 @@
     <string name="error_argument_name_for_class_name_and_member_func_name_cannot_be_nullish">Argument %1$s for %2$s#%3$s cannot be nullish</string>
     <string name="error_arguments_cannot_be_empty">Arguments cannot be empty</string>
     <string name="error_arguments_must_be_empty">Arguments must be empty</string>
+    <string name="error_invalid_host_port">Invalid host:port format</string>
+    <string name="error_invalid_pair_code">Invalid pair code</string>
     <string name="error_at_least_one_abi_needs_to_be_selected">At least one ABI needs to be selected</string>
     <string name="error_autojs6_version_must_not_be_lower_than_ver">AutoJs6 version must not be lower than %1$s</string>
     <string name="error_autojs6_version_number_must_not_be_lower_than_num">AutoJs6 version number must not be lower than %1$s</string>
@@ -772,6 +777,16 @@
     <string name="text_activated_successfully">Activated successfully</string>
     <string name="text_activity_not_found_for_apk_installing">No APK installer</string>
     <string name="text_adb_tool_needed">ADB tool is needed</string>
+    <string name="text_adb_debug_endpoint">Debug endpoint</string>
+    <string name="text_adb_debug_endpoint_hint">Enter the endpoint shown in "Wireless debugging" (IP address &amp; port), usually with port 5555.</string>
+    <string name="text_adb_debug_endpoint_placeholder">Host:Port (debug)</string>
+    <string name="text_adb_pair_code_hint">Enter the 6-digit pairing code shown in Wireless debugging.</string>
+    <string name="text_adb_pair_endpoint">Pairing endpoint</string>
+    <string name="text_adb_pair_endpoint_default">127.0.0.1:37099</string>
+    <string name="text_adb_pair_endpoint_hint">Open "Wireless debugging" in Developer options, choose "Pair device with pairing code", then enter the host:port shown in that page.</string>
+    <string name="text_adb_pair_endpoint_placeholder">Host:Port (pairing)</string>
+    <string name="text_adb_wireless_connecting">Connecting wireless debugging...</string>
+    <string name="text_adb_wireless_pair">Wireless debugging</string>
     <string name="text_add_color_library">Add a color library</string>
     <string name="text_add_symbol_hint">Add a symbol</string>
     <string name="text_alias">alias</string>
@@ -1307,6 +1322,7 @@
     <string name="text_output_apk_path">APK output path</string>
     <string name="text_overwrite">Overwrite</string>
     <string name="text_package_name">Package name</string>
+    <string name="text_pair_code">Pair code</string>
     <string name="text_package_name_with_computing" tools:ignore="TypographyEllipsis">Package name (computing...)</string>
     <string name="text_password">Password</string>
     <string name="text_password_cannot_be_empty">Password cannot be empty</string>
