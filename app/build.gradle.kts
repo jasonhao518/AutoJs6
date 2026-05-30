@@ -590,9 +590,6 @@ android {
         //  !
         getByName("main") {
             assets.directories.add("src/main/assets")
-            java.directories.add("$rootDir/third_party/scrcpy/server/src/main/java")
-            java.directories.add("$rootDir/third_party/scrcpy/server/src/main/java/android/content")
-            aidl.directories.add("$rootDir/third_party/scrcpy/server/src/main/aidl")
         }
         getByName("release") {
             java.directories.add("src/release/java")
