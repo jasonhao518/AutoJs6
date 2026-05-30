@@ -7,6 +7,7 @@ typedef char *(*edge_create_identity_fn)(const char *);
 typedef char *(*edge_start_client_fn)(const char *);
 typedef char *(*edge_stop_client_fn)(void);
 typedef void (*edge_join_free_fn)(char *);
+typedef char *(*edge_provide_scrcpy_jar_fn)(const char *, int);
 
 static const char *kGoLibraryName = "libedgejoin.so";
 
@@ -137,6 +138,51 @@ Java_org_autojs_autojs_runtime_api_EdgeJoinBridge_nativeStopClient(
     }
 
     char *response = edge_stop_client();
+    jstring output;
+    if (response == NULL) {
+        output = make_error(env, "{\"ok\":false,\"status_code\":0,\"error\":\"native response is null\"}");
+    } else {
+        output = (*env)->NewStringUTF(env, response);
+        edge_join_free(response);
+    }
+
+    dlclose(handle);
+    return output;
+}
+
+JNIEXPORT jstring JNICALL
+Java_org_autojs_autojs_runtime_api_EdgeJoinBridge_nativeProvideScrcpyJar(
+        JNIEnv *env,
+        jclass clazz,
+        jbyteArray bytes) {
+    (void) clazz;
+
+    void *handle = open_go_library(env);
+    if (handle == NULL) {
+        return make_error(env, "{\"ok\":false,\"status_code\":0,\"error\":\"failed to open libedgejoin.so\"}");
+    }
+
+    edge_provide_scrcpy_jar_fn edge_provide = (edge_provide_scrcpy_jar_fn) dlsym(handle, "EdgeProvideScrcpyJar");
+    edge_join_free_fn edge_join_free = (edge_join_free_fn) dlsym(handle, "EdgeJoinFree");
+    if (edge_provide == NULL || edge_join_free == NULL) {
+        dlclose(handle);
+        return make_error(env, "{\"ok\":false,\"status_code\":0,\"error\":\"failed to resolve Go symbols\"}");
+    }
+
+    char *response;
+    if (bytes == NULL) {
+        response = edge_provide(NULL, 0);
+    } else {
+        jsize len = (*env)->GetArrayLength(env, bytes);
+        jbyte *buf = (*env)->GetByteArrayElements(env, bytes, NULL);
+        if (buf == NULL) {
+            dlclose(handle);
+            return make_error(env, "{\"ok\":false,\"status_code\":0,\"error\":\"failed to access byte array\"}");
+        }
+        response = edge_provide((const char *) buf, (int) len);
+        (*env)->ReleaseByteArrayElements(env, bytes, buf, JNI_ABORT);
+    }
+
     jstring output;
     if (response == NULL) {
         output = make_error(env, "{\"ok\":false,\"status_code\":0,\"error\":\"native response is null\"}");

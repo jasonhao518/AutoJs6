@@ -9,7 +9,9 @@ import org.autojs.autojs.app.GlobalAppContext;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
@@ -39,6 +41,7 @@ public final class EdgeJoinBridge {
 
     static {
         System.loadLibrary("edgejoin_jni");
+        provideScrcpyJarFromAssets();
     }
 
     private EdgeJoinBridge() {
@@ -47,6 +50,30 @@ public final class EdgeJoinBridge {
     private static native String nativeCreateIdentity(String name);
     private static native String nativeStartClient(String configJson);
     private static native String nativeStopClient();
+    private static native String nativeProvideScrcpyJar(byte[] bytes);
+
+    private static void provideScrcpyJarFromAssets() {
+        try {
+            Context ctx = GlobalAppContext.get();
+            if (ctx == null) {
+                Log.w(TAG, "provideScrcpyJarFromAssets: no application context yet");
+                return;
+            }
+            try (InputStream in = ctx.getAssets().open("scrcpy/scrcpy-server.jar");
+                 ByteArrayOutputStream out = new ByteArrayOutputStream(128 * 1024)) {
+                byte[] buf = new byte[8 * 1024];
+                int n;
+                while ((n = in.read(buf)) > 0) {
+                    out.write(buf, 0, n);
+                }
+                byte[] data = out.toByteArray();
+                String resp = nativeProvideScrcpyJar(data);
+                Log.d(TAG, "provideScrcpyJarFromAssets: provided size=" + data.length + " resp=" + resp);
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "provideScrcpyJarFromAssets: failed to load scrcpy-server.jar from assets", t);
+        }
+    }
 
     public static String createIdentity(String name) {
         Log.d(TAG, "createIdentity: requested with name=" + safeValue(sanitizeName(name)));

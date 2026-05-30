@@ -103,6 +103,7 @@ extern char* EdgeCreateIdentity(char* name);
 extern char* EdgeStartClient(char* configJSON);
 extern char* EdgeStopClient(void);
 extern void EdgeJoinFree(char* ptr);
+extern char* EdgeProvideScrcpyJar(char* data, int length);
 
 #ifdef __cplusplus
 }
