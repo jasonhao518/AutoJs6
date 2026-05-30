@@ -149,8 +149,6 @@ open class DrawerFragment : Fragment() {
     private val projectMediaAutoRequestLock = Any()
     @Volatile
     private var hasAutoRequestedProjectMediaForServerMode = false
-    @Volatile
-    private var hasPromptedWirelessDebugForServerMode = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -338,36 +336,23 @@ open class DrawerFragment : Fragment() {
                 .observeOn(AndroidSchedulers.mainThread())
                 .subscribe { (state, count) ->
                     if (state.isDisconnected()) {
-                        hasPromptedWirelessDebugForServerMode = false
                         Observable
                             .fromCallable { EdgeJoinBridge.stopClient() }
                             .subscribeOn(Schedulers.io())
                             .subscribe({}, {})
                     } else {
-                        if (!isWirelessDebuggingEnabled()) {
-                            Observable
-                                .fromCallable { EdgeJoinBridge.stopClient() }
-                                .subscribeOn(Schedulers.io())
-                                .subscribe({}, {})
-                            if (!hasPromptedWirelessDebugForServerMode) {
-                                hasPromptedWirelessDebugForServerMode = true
-                                showEnableWirelessDebuggingDialog()
-                            }
-                        } else {
-                            hasPromptedWirelessDebugForServerMode = false
-                            Observable
-                                .fromCallable {
-                                    synchronized(projectMediaAutoRequestLock) {
-                                        if (!hasAutoRequestedProjectMediaForServerMode) {
-                                            hasAutoRequestedProjectMediaForServerMode = true
-                                            MediaProjectionPermission(mContext).requestIfNeeded()
-                                        }
+                        Observable
+                            .fromCallable {
+                                synchronized(projectMediaAutoRequestLock) {
+                                    if (!hasAutoRequestedProjectMediaForServerMode) {
+                                        hasAutoRequestedProjectMediaForServerMode = true
+                                        MediaProjectionPermission(mContext).requestIfNeeded()
                                     }
-                                    EdgeJoinBridge.startClientFromStoredConfig()
                                 }
-                                .subscribeOn(Schedulers.io())
-                                .subscribe({}, {})
-                        }
+                                EdgeJoinBridge.startClientFromStoredConfig()
+                            }
+                            .subscribeOn(Schedulers.io())
+                            .subscribe({}, {})
                     }
 
                     drawerItem.subtitle = when {
@@ -390,11 +375,6 @@ open class DrawerFragment : Fragment() {
                 drawerItem.setAction { holder ->
                     when (holder.isChecked()) {
                         true -> {
-                            if (!isWirelessDebuggingEnabled()) {
-                                drawerItem.setCheckedIfNeeded(false)
-                                showEnableWirelessDebuggingDialog()
-                                return@setAction
-                            }
                             showServerModeCredentialsDialog(
                                 onConfirm = { serialNumber, joinKey ->
                                     drawerItem.isProgress = true
@@ -814,26 +794,6 @@ open class DrawerFragment : Fragment() {
             }
 
         drawerStatsDisposables.add(historyDisposable)
-    }
-
-    private fun isWirelessDebuggingEnabled(): Boolean {
-        return Settings.Global.getInt(mContext.contentResolver, "adb_wifi_enabled", 0) == 1
-    }
-
-    private fun showEnableWirelessDebuggingDialog() {
-        com.afollestad.materialdialogs.MaterialDialog.Builder(mContext)
-            .title(R.string.text_adb_wireless_pair)
-            .content(R.string.text_server_mode_wireless_debug_required)
-            .negativeText(R.string.dialog_button_cancel)
-            .negativeColorRes(R.color.dialog_button_default)
-            .positiveText(R.string.text_developer_options)
-            .positiveColorRes(R.color.dialog_button_hint)
-            .onPositive { dialog, _ ->
-                dialog.dismiss()
-                IntentUtils.launchDeveloperOptionsOrSettings(mContext)
-            }
-            .autoDismiss(false)
-            .show()
     }
 
     private fun showServerModeCredentialsDialog(

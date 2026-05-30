@@ -787,7 +787,6 @@
     <string name="text_adb_pair_endpoint_placeholder">Host:Port (pairing)</string>
     <string name="text_adb_wireless_connecting">Connecting wireless debugging...</string>
     <string name="text_adb_wireless_pair">Wireless debugging</string>
-    <string name="text_server_mode_wireless_debug_required">Server mode requires Wireless debugging to be enabled first. Go to Developer options and turn on Wireless debugging.</string>
     <string name="text_add_color_library">Add a color library</string>
     <string name="text_add_symbol_hint">Add a symbol</string>
     <string name="text_alias">alias</string>
