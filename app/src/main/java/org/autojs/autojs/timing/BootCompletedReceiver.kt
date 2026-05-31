@@ -10,7 +10,7 @@ class BootCompletedReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
         val action = intent.action ?: return
-        if (action == Intent.ACTION_BOOT_COMPLETED || action == Intent.ACTION_LOCKED_BOOT_COMPLETED) {
+        if (action == Intent.ACTION_BOOT_COMPLETED || action == Intent.ACTION_LOCKED_BOOT_COMPLETED || action == Intent.ACTION_USER_UNLOCKED) {
             Log.d("BootCompletedReceiver", "System boot completed, re-initializing timed tasks")
             TimedTaskScheduler.init(context.applicationContext)
             EdgeJoinForegroundService.startIfConfigured(context.applicationContext)
