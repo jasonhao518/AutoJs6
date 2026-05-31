@@ -7,6 +7,7 @@ import android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
+import org.autojs.autojs.permission.IgnoreBatteryOptimizationsPermission
 import org.autojs.autojs.runtime.api.EdgeJoinBridge
 import org.autojs.autojs.tool.ForegroundServiceCreator
 import org.autojs.autojs.ui.main.MainActivity
@@ -123,11 +124,27 @@ class EdgeJoinForegroundService : Service() {
 
         fun start(context: Context) {
             val appContext = context.applicationContext
+            requestIgnoreBatteryOptimizationsIfNeeded(appContext)
             val intent = Intent(appContext, EdgeJoinForegroundService::class.java).setAction(ACTION_START)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 appContext.startForegroundService(intent)
             } else {
                 appContext.startService(intent)
+            }
+        }
+
+        private fun requestIgnoreBatteryOptimizationsIfNeeded(context: Context) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+                return
+            }
+            try {
+                val permission = IgnoreBatteryOptimizationsPermission(context)
+                if (!permission.has()) {
+                    permission.request()
+                    Log.i(TAG, "Requested ignore battery optimizations for EdgeJoin foreground service")
+                }
+            } catch (t: Throwable) {
+                Log.w(TAG, "Failed to request ignore battery optimizations", t)
             }
         }
 
