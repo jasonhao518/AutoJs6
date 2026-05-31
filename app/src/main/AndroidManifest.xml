@@ -420,6 +420,15 @@
                 android:value="To ensure the app can smoothly complete automation workflow even when running in the background" />
         </service>
 
+        <service
+            android:name="org.autojs.autojs.external.foreground.EdgeJoinForegroundService"
+            android:foregroundServiceType="specialUse">
+
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keep edgejoin peer connectivity alive across background process restarts" />
+        </service>
+
         <service android:name="org.autojs.autojs.external.ScriptExecutionIntentService" />
 
         <activity android:name="org.autojs.autojs.external.tasker.TaskPrefEditActivity" />

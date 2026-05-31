@@ -27,6 +27,7 @@ import org.autojs.autojs.core.plugin.center.PluginCenterActivity
 import org.autojs.autojs.core.pref.Pref
 import org.autojs.autojs.core.pref.PrefRx
 import org.autojs.autojs.external.foreground.AppForegroundService
+import org.autojs.autojs.external.foreground.EdgeJoinForegroundService
 import org.autojs.autojs.permission.AllFilesAccessPermission
 import org.autojs.autojs.permission.DisplayOverOtherAppsPermission
 import org.autojs.autojs.permission.IgnoreBatteryOptimizationsPermission
@@ -337,7 +338,7 @@ open class DrawerFragment : Fragment() {
                 .subscribe { (state, count) ->
                     if (state.isDisconnected()) {
                         Observable
-                            .fromCallable { EdgeJoinBridge.stopClient() }
+                            .fromCallable { EdgeJoinForegroundService.stop(mContext) }
                             .subscribeOn(Schedulers.io())
                             .subscribe({}, {})
                     } else {
@@ -349,7 +350,7 @@ open class DrawerFragment : Fragment() {
                                         MediaProjectionPermission(mContext).requestIfNeeded()
                                     }
                                 }
-                                EdgeJoinBridge.startClientFromStoredConfig()
+                                EdgeJoinForegroundService.startIfConfigured(mContext)
                             }
                             .subscribeOn(Schedulers.io())
                             .subscribe({}, {})

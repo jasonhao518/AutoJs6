@@ -26,6 +26,7 @@ import org.autojs.autojs.core.ui.inflater.ImageLoader
 import org.autojs.autojs.core.ui.inflater.util.Drawables
 import org.autojs.autojs.event.GlobalKeyObserver
 import org.autojs.autojs.external.receiver.DynamicBroadcastReceivers
+import org.autojs.autojs.external.foreground.EdgeJoinForegroundService
 import org.autojs.autojs.ipc.InAppEventBus
 import org.autojs.autojs.leakcanary.LeakCanarySetup
 import org.autojs.autojs.storage.file.TmpScriptFilesCleanupScheduler
@@ -141,12 +142,12 @@ class App : MultiDexApplication() {
         if (configJson.isBlank()) {
             return
         }
-        io.reactivex.Observable
-            .fromCallable { EdgeJoinBridge.startClientFromStoredConfig() }
-            .subscribeOn(Schedulers.io())
-            .subscribe({}, { e ->
-                Log.w("App", "autoStartServerModeIfEnabled: failed to start edgejoin client", e)
-            })
+            io.reactivex.Observable
+                .fromCallable { EdgeJoinForegroundService.startIfConfigured(this) }
+                .subscribeOn(Schedulers.io())
+                .subscribe({}, { e ->
+                    Log.w("App", "autoStartServerModeIfEnabled: failed to start edgejoin foreground service", e)
+                })
     }
 
     @SuppressLint("CheckResult")

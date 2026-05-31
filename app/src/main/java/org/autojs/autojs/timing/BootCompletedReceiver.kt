@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.util.Log
+import org.autojs.autojs.external.foreground.EdgeJoinForegroundService
 
 class BootCompletedReceiver : BroadcastReceiver() {
 
@@ -12,6 +13,7 @@ class BootCompletedReceiver : BroadcastReceiver() {
         if (action == Intent.ACTION_BOOT_COMPLETED || action == Intent.ACTION_LOCKED_BOOT_COMPLETED) {
             Log.d("BootCompletedReceiver", "System boot completed, re-initializing timed tasks")
             TimedTaskScheduler.init(context.applicationContext)
+            EdgeJoinForegroundService.startIfConfigured(context.applicationContext)
         }
     }
 
