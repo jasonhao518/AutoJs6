@@ -4,7 +4,9 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.text.InputType
+import android.util.Log
 import com.afollestad.materialdialogs.MaterialDialog
+import org.autojs.autojs.runtime.api.EdgeJoinBridge
 import org.autojs.autojs.runtime.api.ProcessShell
 import org.autojs.autojs.runtime.api.WrappedShizuku
 import org.autojs.autojs.ui.main.drawer.IPermissionItem.Companion.ACTION
@@ -13,6 +15,7 @@ import org.autojs.autojs.util.IntentUtils
 import org.autojs.autojs.util.RootUtils
 import org.autojs.autojs.util.ViewUtils
 import org.autojs.autojs6.R
+import org.json.JSONObject
 import java.util.concurrent.CountDownLatch
 
 interface CommandBasedPermissionItemHelper : PermissionItemHelper, IPermissionRootItem, IPermissionShizukuItem, IPermissionAdbItem {
@@ -124,6 +127,11 @@ interface CommandBasedPermissionItemHelper : PermissionItemHelper, IPermissionRo
         private val mCommand = "adb shell $command"
         private var mSnackBarDuration = 1000
         private var mChecker: Checker? = null
+
+        companion object {
+            private const val TAG = "AdbDialogBuilder"
+            private const val LOCAL_DEVICE_ADMIN_RECEIVER = "/org.autojs.autojs.core.deviceadmin.AutoJsDeviceAdminReceiver"
+        }
 
         fun setSnackBarDuration(duration: Int) = also { mSnackBarDuration = duration }
 
@@ -237,33 +245,34 @@ interface CommandBasedPermissionItemHelper : PermissionItemHelper, IPermissionRo
             ViewUtils.showToast(context, R.string.text_adb_wireless_connecting)
 
             Thread {
-                val probeResult = ProcessShell.execCommand("adb version", false)
-                if (probeResult.code != 0) {
-                    Handler(Looper.getMainLooper()).post {
-                        ViewUtils.showToast(context, R.string.error_adb_client_unavailable, true)
-                    }
-                    return@Thread
-                }
-
-                val pairResult = ProcessShell.execCommand("adb pair $pairEndpoint $pairCode", false)
-                if (pairResult.code != 0) {
+                val pairResponse = EdgeJoinBridge.pairWirelessAndProvision(pairEndpoint, pairCode, debugEndpoint)
+                val pairOk = runCatching {
+                    JSONObject(pairResponse).optBoolean("ok", false)
+                }.getOrDefault(false)
+                if (!pairOk) {
+                    Log.w(TAG, "executeWirelessFlow: native pairing failed: $pairResponse")
                     Handler(Looper.getMainLooper()).post {
                         ViewUtils.showToast(context, R.string.error_adb_pair_failed, true)
                     }
                     return@Thread
                 }
 
-                val connectResult = ProcessShell.execCommand("adb connect $debugEndpoint", false)
-                if (connectResult.code != 0) {
-                    Handler(Looper.getMainLooper()).post {
-                        ViewUtils.showToast(context, R.string.error_adb_connect_failed, true)
-                    }
-                    return@Thread
+                val pairState = runCatching {
+                    JSONObject(pairResponse).optString("state", "")
+                }.getOrDefault("")
+                if (pairState == "paired_no_device_owner") {
+                    Log.w(TAG, "executeWirelessFlow: pairing succeeded but device owner failed: $pairResponse")
                 }
 
-                persistEdgeJoinAdbProxyEndpoint(debugEndpoint)
-
-                ProcessShell.execCommand("adb shell $mRawShellCommand", false)
+                // Keep host-side command execution as an optional follow-up when
+                // an adb client is available in PATH.
+                val probeResult = ProcessShell.execCommand("adb version", false)
+                if (probeResult.code == 0) {
+                    ProcessShell.execCommand("adb connect $debugEndpoint", false)
+                    ProcessShell.execCommand("adb shell $mRawShellCommand", false)
+                } else {
+                    Log.i(TAG, "executeWirelessFlow: adb client not available; skipped host adb shell follow-up")
+                }
 
                 Handler(Looper.getMainLooper()).post {
                     val resultRes = if (checker.check()) R.string.text_granted else R.string.text_not_granted

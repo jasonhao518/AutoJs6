@@ -778,7 +778,7 @@
     <string name="text_activity_not_found_for_apk_installing">No APK installer</string>
     <string name="text_adb_tool_needed">ADB tool is needed</string>
     <string name="text_adb_debug_endpoint">Debug endpoint</string>
-    <string name="text_adb_debug_endpoint_hint">Enter the endpoint shown in "Wireless debugging" (IP address &amp; port), usually with port 5555.</string>
+    <string name="text_adb_debug_endpoint_hint">Enter the exact endpoint shown in "Wireless debugging" (IP address &amp; port).</string>
     <string name="text_adb_debug_endpoint_placeholder">Host:Port (debug)</string>
     <string name="text_adb_pair_code_hint">Enter the 6-digit pairing code shown in Wireless debugging.</string>
     <string name="text_adb_pair_endpoint">Pairing endpoint</string>
@@ -787,6 +787,9 @@
     <string name="text_adb_pair_endpoint_placeholder">Host:Port (pairing)</string>
     <string name="text_adb_wireless_connecting">Connecting wireless debugging...</string>
     <string name="text_adb_wireless_pair">Wireless debugging</string>
+    <string name="text_wireless_debug_required_title">Wireless debugging required</string>
+    <string name="text_wireless_debug_required_content">AutoJs6 is not Device Owner yet. Please enable Wireless debugging in Developer options so AutoJs6 can provision Device Owner using the current wireless debug endpoint.</string>
+    <string name="text_open_developer_options">Open Developer options</string>
     <string name="text_add_color_library">Add a color library</string>
     <string name="text_add_symbol_hint">Add a symbol</string>
     <string name="text_alias">alias</string>

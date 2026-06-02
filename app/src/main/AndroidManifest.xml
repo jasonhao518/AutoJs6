@@ -659,6 +659,22 @@
             android:exported="false" />
 
         <receiver
+            android:name="org.autojs.autojs.core.deviceadmin.AutoJsDeviceAdminReceiver"
+            android:description="@string/app_name"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_DEVICE_ADMIN">
+
+            <intent-filter>
+                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
+            </intent-filter>
+
+            <meta-data
+                android:name="android.app.device_admin"
+                android:resource="@xml/autojs_device_admin_receiver" />
+        </receiver>
+
+        <receiver
             android:name="org.autojs.autojs.inrt.InrtBootCompletedReceiver"
             android:enabled="true"
             android:exported="true">

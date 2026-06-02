@@ -8,6 +8,7 @@ typedef char *(*edge_start_client_fn)(const char *);
 typedef char *(*edge_stop_client_fn)(void);
 typedef void (*edge_join_free_fn)(char *);
 typedef char *(*edge_provide_scrcpy_jar_fn)(const char *, int);
+typedef char *(*edge_pair_wireless_fn)(const char *, int, const char *, const char *);
 
 static const char *kGoLibraryName = "libedgejoin.so";
 
@@ -182,6 +183,53 @@ Java_org_autojs_autojs_runtime_api_EdgeJoinBridge_nativeProvideScrcpyJar(
         response = edge_provide((const char *) buf, (int) len);
         (*env)->ReleaseByteArrayElements(env, bytes, buf, JNI_ABORT);
     }
+
+    jstring output;
+    if (response == NULL) {
+        output = make_error(env, "{\"ok\":false,\"status_code\":0,\"error\":\"native response is null\"}");
+    } else {
+        output = (*env)->NewStringUTF(env, response);
+        edge_join_free(response);
+    }
+
+    dlclose(handle);
+    return output;
+}
+
+JNIEXPORT jstring JNICALL
+Java_org_autojs_autojs_runtime_api_EdgeJoinBridge_nativePairWireless(
+        JNIEnv *env,
+        jclass clazz,
+        jstring host,
+        jint port,
+        jstring code,
+        jstring package_name) {
+    (void) clazz;
+
+    void *handle = open_go_library(env);
+    if (handle == NULL) {
+        return make_error(env, "{\"ok\":false,\"status_code\":0,\"error\":\"failed to open libedgejoin.so\"}");
+    }
+
+    edge_pair_wireless_fn edge_pair_wireless = (edge_pair_wireless_fn) dlsym(handle, "EdgePairWireless");
+    edge_join_free_fn edge_join_free = (edge_join_free_fn) dlsym(handle, "EdgeJoinFree");
+    if (edge_pair_wireless == NULL || edge_join_free == NULL) {
+        dlclose(handle);
+        return make_error(env, "{\"ok\":false,\"status_code\":0,\"error\":\"failed to resolve Go symbols\"}");
+    }
+
+    const char *release_host = NULL;
+    const char *release_code = NULL;
+    const char *release_package = NULL;
+    const char *native_host = get_utf_or_empty(env, host, &release_host);
+    const char *native_code = get_utf_or_empty(env, code, &release_code);
+    const char *native_package = get_utf_or_empty(env, package_name, &release_package);
+
+    char *response = edge_pair_wireless(native_host, (int) port, native_code, native_package);
+
+    release_utf(env, host, release_host);
+    release_utf(env, code, release_code);
+    release_utf(env, package_name, release_package);
 
     jstring output;
     if (response == NULL) {

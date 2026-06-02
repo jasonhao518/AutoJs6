@@ -51,6 +51,17 @@ public final class EdgeJoinBridge {
     private static native String nativeStartClient(String configJson);
     private static native String nativeStopClient();
     private static native String nativeProvideScrcpyJar(byte[] bytes);
+    private static native String nativePairWireless(String host, int port, String code, String packageName);
+
+    private static final class HostPort {
+        final String host;
+        final int port;
+
+        HostPort(String host, int port) {
+            this.host = host;
+            this.port = port;
+        }
+    }
 
     private static void provideScrcpyJarFromAssets() {
         try {
@@ -89,6 +100,34 @@ public final class EdgeJoinBridge {
     public static String stopClient() {
         Log.d(TAG, "stopClient: requested");
         return nativeStopClient();
+    }
+
+    public static String pairWirelessAndProvision(String pairEndpoint, String pairCode, String debugEndpoint) {
+        String normalizedCode = trimOrEmpty(pairCode);
+        if (normalizedCode.isEmpty()) {
+            return buildErrorResult("pair code is required", 0);
+        }
+
+        HostPort pair = parseHostPort(trimOrEmpty(pairEndpoint));
+        if (pair == null) {
+            return buildErrorResult("invalid pair endpoint, expected host:port", 0);
+        }
+        HostPort debug = parseHostPort(trimOrEmpty(debugEndpoint));
+        if (debug == null) {
+            return buildErrorResult("invalid debug endpoint, expected host:port", 0);
+        }
+
+        persistAdbProxyEndpoint(debug.host, debug.port);
+
+        Context context = GlobalAppContext.get();
+        String packageName = context != null ? trimOrEmpty(context.getPackageName()) : "";
+        if (packageName.isEmpty()) {
+            return buildErrorResult("application context unavailable", 0);
+        }
+
+        Log.d(TAG, "pairWirelessAndProvision: pair=" + pair.host + ":" + pair.port
+                + ", debug=" + debug.host + ":" + debug.port + ", package=" + packageName);
+        return nativePairWireless(pair.host, pair.port, normalizedCode, packageName);
     }
 
     public static String joinAndPersist(String serialNumber, String joinKey, String version, String name) {
@@ -241,6 +280,41 @@ public final class EdgeJoinBridge {
         return config;
     }
 
+    /**
+     * Persists the adb proxy endpoint (host/port) into the EdgeJoin preferences so that
+     * {@link #loadStoredConfig()} merges it into the config consumed by the native client.
+     * Pass a non-positive port to clear the stored port.
+     *
+     * @return true if the stored port changed.
+     */
+    public static boolean persistAdbProxyEndpoint(String host, int port) {
+        Context context = GlobalAppContext.get();
+        if (context == null) {
+            return false;
+        }
+        SharedPreferences preferences = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
+        int previousPort = preferences.getInt(KEY_ADB_PROXY_PORT, 0);
+        String previousHost = trimOrEmpty(preferences.getString(KEY_ADB_PROXY_HOST, ""));
+        String normalizedHost = trimOrEmpty(host);
+
+        SharedPreferences.Editor editor = preferences.edit();
+        if (!normalizedHost.isEmpty()) {
+            editor.putString(KEY_ADB_PROXY_HOST, normalizedHost);
+        }
+        if (port > 0 && port <= 65535) {
+            editor.putInt(KEY_ADB_PROXY_PORT, port);
+        } else {
+            editor.remove(KEY_ADB_PROXY_PORT);
+        }
+        editor.apply();
+
+        boolean changed = previousPort != port
+                || (!normalizedHost.isEmpty() && !normalizedHost.equals(previousHost));
+        Log.d(TAG, "persistAdbProxyEndpoint: host=" + safeValue(normalizedHost) + ", port=" + port
+                + ", previousPort=" + previousPort + ", changed=" + changed);
+        return changed;
+    }
+
     public static String loadStoredPeerId() {
         Context context = GlobalAppContext.get();
         SharedPreferences preferences = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
@@ -322,5 +396,28 @@ public final class EdgeJoinBridge {
             return value.charAt(0) + "***";
         }
         return value.substring(0, 4) + "..." + value.substring(value.length() - 4);
+    }
+
+    private static HostPort parseHostPort(String endpoint) {
+        String normalized = trimOrEmpty(endpoint);
+        int idx = normalized.lastIndexOf(':');
+        if (idx <= 0 || idx >= normalized.length() - 1) {
+            return null;
+        }
+        String host = trimOrEmpty(normalized.substring(0, idx));
+        String portPart = trimOrEmpty(normalized.substring(idx + 1));
+        if (host.isEmpty() || portPart.isEmpty()) {
+            return null;
+        }
+        int port;
+        try {
+            port = Integer.parseInt(portPart);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+        if (port <= 0 || port > 65535) {
+            return null;
+        }
+        return new HostPort(host, port);
     }
 }

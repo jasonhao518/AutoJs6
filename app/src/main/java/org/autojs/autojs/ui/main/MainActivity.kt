@@ -24,6 +24,7 @@ import org.autojs.autojs.app.FragmentPagerAdapterBuilder.StoredFragmentPagerAdap
 import org.autojs.autojs.app.OnActivityResultDelegate
 import org.autojs.autojs.app.OnActivityResultDelegate.DelegateHost
 import org.autojs.autojs.core.accessibility.AccessibilityTool
+import org.autojs.autojs.core.deviceadmin.DeviceOwnerProvisioningGuard
 import org.autojs.autojs.core.permission.RequestPermissionCallbacks
 import org.autojs.autojs.core.pref.Pref
 import org.autojs.autojs.event.BackPressedHandler
@@ -206,6 +207,7 @@ class MainActivity : BaseActivity(), DelegateHost, HostActivity {
     override fun onStart() {
         super.onStart()
         keepAppRunningInBackgroundIfEnabled()
+        DeviceOwnerProvisioningGuard.maybeShowWirelessDebugDialog(this)
         // @Hint by SuperMonster003 on Dec 24, 2025.
         //  ! Avoid binding Shizuku user service on app start.
         //  ! It may spawn root user-service processes repeatedly during IDE "Run" (force-stop + relaunch).

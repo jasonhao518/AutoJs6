@@ -39,6 +39,12 @@ static void edgejoin_log_write(int prio, const char* tag, const char* text) {
 
 #line 1 "cgo-generated-wrapper"
 
+#line 3 "pairing.go"
+
+#include <stdlib.h>
+
+#line 1 "cgo-generated-wrapper"
+
 
 /* End of preamble from import "C" comments.  */
 
@@ -104,6 +110,7 @@ extern char* EdgeStartClient(char* configJSON);
 extern char* EdgeStopClient(void);
 extern void EdgeJoinFree(char* ptr);
 extern char* EdgeProvideScrcpyJar(char* data, int length);
+extern char* EdgePairWireless(char* host, int port, char* code, char* packageName);
 
 #ifdef __cplusplus
 }

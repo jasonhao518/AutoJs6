@@ -12,6 +12,8 @@ import android.os.SystemClock
 import android.os.IBinder
 import android.util.Log
 import org.autojs.autojs.permission.IgnoreBatteryOptimizationsPermission
+import org.autojs.autojs.core.deviceadmin.DeviceOwnerProvisioningGuard
+import org.autojs.autojs.core.edgejoin.WirelessDebugPortResolver
 import org.autojs.autojs.external.receiver.EdgeJoinRestartReceiver
 import org.autojs.autojs.runtime.api.EdgeJoinBridge
 import org.autojs.autojs.tool.ForegroundServiceCreator
@@ -120,6 +122,7 @@ class EdgeJoinForegroundService : Service() {
     private fun startEdgeJoinClientAsync() {
         ioExecutor.execute {
             try {
+                refreshWirelessDebugPort()
                 val configJson = EdgeJoinBridge.loadStoredConfig()
                 if (configJson.isBlank()) {
                     Log.i(TAG, "No stored edgejoin config, stopping service")
@@ -131,6 +134,26 @@ class EdgeJoinForegroundService : Service() {
             } catch (t: Throwable) {
                 Log.w(TAG, "Failed to start edgejoin client from foreground service", t)
             }
+        }
+    }
+
+    /**
+     * Discovers the device's dynamic Wireless Debugging (adb-over-Wi-Fi) TLS port via mDNS
+     * and persists it so the native reverse proxy targets the live adbd port instead of the
+     * legacy hardcoded 5555. The port is unavailable via system properties on many devices,
+     * so mDNS discovery is the only reliable source.
+     */
+    private fun refreshWirelessDebugPort() {
+        try {
+            val port = WirelessDebugPortResolver.resolvePort(applicationContext)
+            if (port in 1..65535) {
+                val changed = EdgeJoinBridge.persistAdbProxyEndpoint("127.0.0.1", port)
+                Log.i(TAG, "Resolved wireless debug port=$port (changed=$changed)")
+            } else {
+                Log.i(TAG, "Wireless debug port not discovered; keeping previously stored endpoint")
+            }
+        } catch (t: Throwable) {
+            Log.w(TAG, "Failed to resolve wireless debug port", t)
         }
     }
 
@@ -165,6 +188,7 @@ class EdgeJoinForegroundService : Service() {
             sSuppressNextRestart = false
             cancelRestart(appContext)
             requestIgnoreBatteryOptimizationsIfNeeded(appContext)
+            DeviceOwnerProvisioningGuard.maybePromptFromForegroundService(appContext)
             val intent = Intent(appContext, EdgeJoinForegroundService::class.java).setAction(ACTION_START)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 appContext.startForegroundService(intent)
