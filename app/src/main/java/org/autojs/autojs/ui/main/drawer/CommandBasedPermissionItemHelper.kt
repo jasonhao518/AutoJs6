@@ -3,10 +3,8 @@ package org.autojs.autojs.ui.main.drawer
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
-import android.text.InputType
-import android.util.Log
 import com.afollestad.materialdialogs.MaterialDialog
-import org.autojs.autojs.runtime.api.EdgeJoinBridge
+import org.autojs.autojs.core.deviceadmin.DeviceOwnerProvisioningGuard
 import org.autojs.autojs.runtime.api.ProcessShell
 import org.autojs.autojs.runtime.api.WrappedShizuku
 import org.autojs.autojs.ui.main.drawer.IPermissionItem.Companion.ACTION
@@ -15,7 +13,6 @@ import org.autojs.autojs.util.IntentUtils
 import org.autojs.autojs.util.RootUtils
 import org.autojs.autojs.util.ViewUtils
 import org.autojs.autojs6.R
-import org.json.JSONObject
 import java.util.concurrent.CountDownLatch
 
 interface CommandBasedPermissionItemHelper : PermissionItemHelper, IPermissionRootItem, IPermissionShizukuItem, IPermissionAdbItem {
@@ -156,152 +153,16 @@ interface CommandBasedPermissionItemHelper : PermissionItemHelper, IPermissionRo
                 .negativeText(R.string.dialog_button_cancel)
                 .negativeColorRes(R.color.dialog_button_default)
                 .onNegative { dialog, _ -> dialog.dismiss() }
-                .positiveText(R.string.text_pair_code)
+                .positiveText(R.string.text_open_developer_options)
                 .positiveColorRes(R.color.dialog_button_hint)
                 .onPositive { dialog, _ ->
                     dialog.dismiss()
-                    showPairEndpointDialog(it)
+                    IntentUtils.launchDeveloperOptionsOrSettingsExternally(context)
+                    DeviceOwnerProvisioningGuard.notifyPairingNotification(context)
+                    ViewUtils.showToast(context, R.string.text_adb_pair_open_page_hint, true)
                 }
                 .autoDismiss(false)
         } ?: throw Exception("A checker is required for AdbDialogBuilder")
-
-        private fun showPairEndpointDialog(checker: Checker) {
-            MaterialDialog.Builder(context)
-                .title(R.string.text_adb_pair_endpoint)
-                .content(R.string.text_adb_pair_endpoint_hint)
-                .inputType(InputType.TYPE_CLASS_TEXT)
-                .input(
-                    context.getString(R.string.text_adb_pair_endpoint_placeholder),
-                    context.getString(R.string.text_adb_pair_endpoint_default),
-                ) { dialog, input ->
-                    val pairEndpoint = input?.toString()?.trim().orEmpty()
-                    if (!isValidHostPort(pairEndpoint)) {
-                        ViewUtils.showSnack(dialog.view, R.string.error_invalid_host_port, true)
-                        return@input
-                    }
-                    dialog.dismiss()
-                    showPairCodeDialog(checker, pairEndpoint)
-                }
-                .neutralText(R.string.text_permission_test)
-                .neutralColorRes(R.color.dialog_button_hint)
-                .onNeutral { _, _ ->
-                    IntentUtils.launchDeveloperOptionsOrSettings(context)
-                }
-                .positiveText(R.string.dialog_button_next_step)
-                .negativeText(R.string.dialog_button_cancel)
-                .autoDismiss(false)
-                .show()
-        }
-
-        private fun showPairCodeDialog(checker: Checker, pairEndpoint: String) {
-            MaterialDialog.Builder(context)
-                .title(R.string.text_pair_code)
-                .content(R.string.text_adb_pair_code_hint)
-                .inputType(InputType.TYPE_CLASS_NUMBER)
-                .input(
-                    context.getString(R.string.text_pair_code),
-                    "",
-                ) { dialog, input ->
-                    val pairCode = input?.toString()?.trim().orEmpty()
-                    if (pairCode.length < 6) {
-                        ViewUtils.showSnack(dialog.view, R.string.error_invalid_pair_code, true)
-                        return@input
-                    }
-                    dialog.dismiss()
-                    showDebugEndpointDialog(checker, pairEndpoint, pairCode)
-                }
-                .positiveText(R.string.dialog_button_next_step)
-                .negativeText(R.string.dialog_button_cancel)
-                .autoDismiss(false)
-                .show()
-        }
-
-        private fun showDebugEndpointDialog(checker: Checker, pairEndpoint: String, pairCode: String) {
-            val host = pairEndpoint.substringBefore(':')
-            val defaultDebugEndpoint = "$host:5555"
-            MaterialDialog.Builder(context)
-                .title(R.string.text_adb_debug_endpoint)
-                .content(R.string.text_adb_debug_endpoint_hint)
-                .inputType(InputType.TYPE_CLASS_TEXT)
-                .input(
-                    context.getString(R.string.text_adb_debug_endpoint_placeholder),
-                    defaultDebugEndpoint,
-                ) { dialog, input ->
-                    val debugEndpoint = input?.toString()?.trim().orEmpty()
-                    if (!isValidHostPort(debugEndpoint)) {
-                        ViewUtils.showSnack(dialog.view, R.string.error_invalid_host_port, true)
-                        return@input
-                    }
-                    dialog.dismiss()
-                    executeWirelessFlow(checker, pairEndpoint, pairCode, debugEndpoint)
-                }
-                .positiveText(R.string.dialog_button_connect)
-                .negativeText(R.string.dialog_button_cancel)
-                .autoDismiss(false)
-                .show()
-        }
-
-        private fun executeWirelessFlow(checker: Checker, pairEndpoint: String, pairCode: String, debugEndpoint: String) {
-            ViewUtils.showToast(context, R.string.text_adb_wireless_connecting)
-
-            Thread {
-                val pairResponse = EdgeJoinBridge.pairWirelessAndProvision(pairEndpoint, pairCode, debugEndpoint)
-                val pairOk = runCatching {
-                    JSONObject(pairResponse).optBoolean("ok", false)
-                }.getOrDefault(false)
-                if (!pairOk) {
-                    Log.w(TAG, "executeWirelessFlow: native pairing failed: $pairResponse")
-                    Handler(Looper.getMainLooper()).post {
-                        ViewUtils.showToast(context, R.string.error_adb_pair_failed, true)
-                    }
-                    return@Thread
-                }
-
-                val pairState = runCatching {
-                    JSONObject(pairResponse).optString("state", "")
-                }.getOrDefault("")
-                if (pairState == "paired_no_device_owner") {
-                    Log.w(TAG, "executeWirelessFlow: pairing succeeded but device owner failed: $pairResponse")
-                }
-
-                // Keep host-side command execution as an optional follow-up when
-                // an adb client is available in PATH.
-                val probeResult = ProcessShell.execCommand("adb version", false)
-                if (probeResult.code == 0) {
-                    ProcessShell.execCommand("adb connect $debugEndpoint", false)
-                    ProcessShell.execCommand("adb shell $mRawShellCommand", false)
-                } else {
-                    Log.i(TAG, "executeWirelessFlow: adb client not available; skipped host adb shell follow-up")
-                }
-
-                Handler(Looper.getMainLooper()).post {
-                    val resultRes = if (checker.check()) R.string.text_granted else R.string.text_not_granted
-                    ViewUtils.showToast(context, resultRes)
-                }
-            }.start()
-        }
-
-        private fun isValidHostPort(value: String): Boolean {
-            val idx = value.lastIndexOf(':')
-            if (idx <= 0 || idx >= value.lastIndex) return false
-            val host = value.substring(0, idx)
-            val port = value.substring(idx + 1).toIntOrNull() ?: return false
-            return host.isNotBlank() && port in 1..65535
-        }
-
-        private fun persistEdgeJoinAdbProxyEndpoint(debugEndpoint: String) {
-            val idx = debugEndpoint.lastIndexOf(':')
-            if (idx <= 0 || idx >= debugEndpoint.lastIndex) return
-            val host = debugEndpoint.substring(0, idx).trim()
-            val port = debugEndpoint.substring(idx + 1).trim().toIntOrNull() ?: return
-            if (host.isBlank() || port !in 1..65535) return
-
-            context.getSharedPreferences("edgejoin", Context.MODE_PRIVATE)
-                .edit()
-                .putString("adb_proxy_host", host)
-                .putInt("adb_proxy_port", port)
-                .apply()
-        }
 
     }
 

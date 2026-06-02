@@ -429,6 +429,16 @@
                 android:value="Keep edgejoin peer connectivity alive across background process restarts" />
         </service>
 
+        <service
+            android:name="org.autojs.autojs.core.deviceadmin.WirelessAdbPairingService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Discover and complete wireless ADB pairing requested by the user from notification input" />
+        </service>
+
         <service android:name="org.autojs.autojs.external.ScriptExecutionIntentService" />
 
         <activity android:name="org.autojs.autojs.external.tasker.TaskPrefEditActivity" />
@@ -655,6 +665,11 @@
 
         <receiver
             android:name="org.autojs.autojs.external.receiver.EdgeJoinRestartReceiver"
+            android:enabled="true"
+            android:exported="false" />
+
+        <receiver
+            android:name="org.autojs.autojs.core.deviceadmin.EdgeJoinPairingActionReceiver"
             android:enabled="true"
             android:exported="false" />
 

@@ -51,7 +51,8 @@ public final class EdgeJoinBridge {
     private static native String nativeStartClient(String configJson);
     private static native String nativeStopClient();
     private static native String nativeProvideScrcpyJar(byte[] bytes);
-    private static native String nativePairWireless(String host, int port, String code, String packageName);
+    private static native String nativePairWireless(String host, int port, String code, String packageName, String debugHost, int debugPort);
+    private static native String nativeProvisionDeviceOwner(String debugHost, int debugPort, String packageName);
 
     private static final class HostPort {
         final String host;
@@ -127,7 +128,34 @@ public final class EdgeJoinBridge {
 
         Log.d(TAG, "pairWirelessAndProvision: pair=" + pair.host + ":" + pair.port
                 + ", debug=" + debug.host + ":" + debug.port + ", package=" + packageName);
-        return nativePairWireless(pair.host, pair.port, normalizedCode, packageName);
+        return nativePairWireless(pair.host, pair.port, normalizedCode, packageName, debug.host, debug.port);
+    }
+
+    /**
+     * Run the {@code dpm set-device-owner} adb-shell step on its own over the
+     * already-trusted wireless-debug channel. Use this to retry device-owner
+     * provisioning after a successful pairing whose device-owner step did not
+     * complete (e.g. the connect channel was not ready right after pairing).
+     *
+     * @param debugEndpoint wireless-debug connect endpoint as {@code host:port}
+     * @return native JSON result; {@code ok=true} with {@code state=paired_device_owner} on success
+     */
+    public static String provisionDeviceOwner(String debugEndpoint) {
+        HostPort debug = parseHostPort(trimOrEmpty(debugEndpoint));
+        if (debug == null) {
+            return buildErrorResult("invalid debug endpoint, expected host:port", 0);
+        }
+
+        persistAdbProxyEndpoint(debug.host, debug.port);
+
+        Context context = GlobalAppContext.get();
+        String packageName = context != null ? trimOrEmpty(context.getPackageName()) : "";
+        if (packageName.isEmpty()) {
+            return buildErrorResult("application context unavailable", 0);
+        }
+
+        Log.d(TAG, "provisionDeviceOwner: debug=" + debug.host + ":" + debug.port + ", package=" + packageName);
+        return nativeProvisionDeviceOwner(debug.host, debug.port, packageName);
     }
 
     public static String joinAndPersist(String serialNumber, String joinKey, String version, String name) {

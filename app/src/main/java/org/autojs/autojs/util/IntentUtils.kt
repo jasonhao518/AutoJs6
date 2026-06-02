@@ -299,6 +299,25 @@ object IntentUtils {
         intents.firstOrNull { it.resolveActivity(pm) != null }?.startSafely(context)
     }
 
+    /**
+     * Opens Developer Options / Settings in a separate Settings task so we
+     * don't keep the user inside the current app dialog/task flow.
+     */
+    @JvmStatic
+    fun launchDeveloperOptionsOrSettingsExternally(context: Context) {
+        val intents = listOf(
+            Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS),
+            Intent(Settings.ACTION_SETTINGS),
+        )
+
+        val pm = context.packageManager
+        intents.firstOrNull { it.resolveActivity(pm) != null }?.apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            addFlags(Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
+            addFlags(Intent.FLAG_ACTIVITY_NO_HISTORY)
+        }?.startSafely(context.applicationContext)
+    }
+
     fun requestAppUsagePermission(context: Context) =
         Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
             .startSafely(context, true)

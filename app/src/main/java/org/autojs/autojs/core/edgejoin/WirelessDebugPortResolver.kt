@@ -4,10 +4,12 @@ import android.content.Context
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.util.Log
+import java.net.InetAddress
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Discovers the device's own Wireless Debugging (adb over Wi-Fi) TLS connect port
@@ -22,8 +24,14 @@ import java.util.concurrent.atomic.AtomicBoolean
 object WirelessDebugPortResolver {
 
     private const val TAG = "WirelessDebugPort"
-    private const val SERVICE_TYPE = "_adb-tls-connect._tcp."
+    private const val CONNECT_SERVICE_TYPE = "_adb-tls-connect._tcp."
+    private const val PAIRING_SERVICE_TYPE = "_adb-tls-pairing._tcp."
     private const val DEFAULT_TIMEOUT_MS = 5_000L
+
+    data class Endpoint(
+        val host: String,
+        val port: Int,
+    )
 
     /**
      * Blocking discovery of the local wireless-debug TLS connect port.
@@ -35,16 +43,43 @@ object WirelessDebugPortResolver {
     @JvmStatic
     @JvmOverloads
     fun resolvePort(context: Context, timeoutMs: Long = DEFAULT_TIMEOUT_MS): Int {
+        return resolveEndpoint(context, CONNECT_SERVICE_TYPE, timeoutMs)?.port ?: 0
+    }
+
+    /**
+     * Blocking discovery of the local wireless-debug pairing endpoint via
+     * `_adb-tls-pairing._tcp` mDNS service.
+     *
+     * Must NOT be called on the main thread.
+     *
+     * @return endpoint host+port, or null if discovery failed/timed out.
+     */
+    @JvmStatic
+    @JvmOverloads
+    fun resolvePairingEndpoint(context: Context, timeoutMs: Long = DEFAULT_TIMEOUT_MS): Endpoint? {
+        return resolveEndpoint(context, PAIRING_SERVICE_TYPE, timeoutMs)
+    }
+
+    private fun resolveEndpoint(context: Context, serviceType: String, timeoutMs: Long): Endpoint? {
         val nsdManager = context.applicationContext
             .getSystemService(Context.NSD_SERVICE) as? NsdManager
         if (nsdManager == null) {
-            Log.w(TAG, "resolvePort: NsdManager unavailable")
-            return 0
+            Log.w(TAG, "resolveEndpoint: NsdManager unavailable serviceType=$serviceType")
+            return null
         }
 
         val resolvedPort = AtomicInteger(0)
+        val resolvedHost = AtomicReference<String>("")
         val doneLatch = CountDownLatch(1)
         val resolveInFlight = AtomicBoolean(false)
+
+        fun normalizeHost(host: InetAddress?): String {
+            val raw = host?.hostAddress?.trim().orEmpty()
+            if (raw.isEmpty()) return ""
+            // Drop IPv6 zone suffix (e.g. fe80::1%wlan0)
+            val zoneIdx = raw.indexOf('%')
+            return if (zoneIdx > 0) raw.substring(0, zoneIdx) else raw
+        }
 
         val resolveListener = object : NsdManager.ResolveListener {
             override fun onResolveFailed(serviceInfo: NsdServiceInfo?, errorCode: Int) {
@@ -55,9 +90,11 @@ object WirelessDebugPortResolver {
 
             override fun onServiceResolved(serviceInfo: NsdServiceInfo?) {
                 val port = serviceInfo?.port ?: 0
-                Log.d(TAG, "onServiceResolved: ${serviceInfo?.serviceName} port=$port")
+                val host = normalizeHost(serviceInfo?.host)
+                Log.d(TAG, "onServiceResolved: ${serviceInfo?.serviceName} host=$host port=$port type=$serviceType")
                 if (port in 1..65535) {
                     resolvedPort.set(port)
+                    resolvedHost.set(host)
                     doneLatch.countDown()
                 } else {
                     resolveInFlight.set(false)
@@ -67,7 +104,7 @@ object WirelessDebugPortResolver {
 
         val discoveryListener = object : NsdManager.DiscoveryListener {
             override fun onStartDiscoveryFailed(serviceType: String?, errorCode: Int) {
-                Log.w(TAG, "onStartDiscoveryFailed: code=$errorCode")
+                Log.w(TAG, "onStartDiscoveryFailed: code=$errorCode serviceType=$serviceType")
                 doneLatch.countDown()
             }
 
@@ -85,7 +122,7 @@ object WirelessDebugPortResolver {
 
             override fun onServiceFound(serviceInfo: NsdServiceInfo?) {
                 if (serviceInfo == null) return
-                Log.d(TAG, "onServiceFound: ${serviceInfo.serviceName}")
+                Log.d(TAG, "onServiceFound: ${serviceInfo.serviceName} type=$serviceType")
                 // Resolve only one service at a time; NsdManager rejects concurrent resolves.
                 if (resolveInFlight.compareAndSet(false, true)) {
                     try {
@@ -104,15 +141,23 @@ object WirelessDebugPortResolver {
 
         var discoveryStarted = false
         return try {
-            nsdManager.discoverServices(SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, discoveryListener)
+            nsdManager.discoverServices(serviceType, NsdManager.PROTOCOL_DNS_SD, discoveryListener)
             discoveryStarted = true
             if (!doneLatch.await(timeoutMs, TimeUnit.MILLISECONDS)) {
-                Log.w(TAG, "resolvePort: timed out after ${timeoutMs}ms")
+                Log.w(TAG, "resolveEndpoint: timed out after ${timeoutMs}ms serviceType=$serviceType")
             }
-            resolvedPort.get()
+            val port = resolvedPort.get()
+            if (port !in 1..65535) {
+                null
+            } else {
+                Endpoint(
+                    host = resolvedHost.get().takeIf { it.isNotBlank() } ?: "127.0.0.1",
+                    port = port,
+                )
+            }
         } catch (t: Throwable) {
-            Log.w(TAG, "resolvePort: discovery error", t)
-            0
+            Log.w(TAG, "resolveEndpoint: discovery error serviceType=$serviceType", t)
+            null
         } finally {
             if (discoveryStarted) {
                 try {

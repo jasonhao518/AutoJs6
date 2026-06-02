@@ -110,7 +110,8 @@ extern char* EdgeStartClient(char* configJSON);
 extern char* EdgeStopClient(void);
 extern void EdgeJoinFree(char* ptr);
 extern char* EdgeProvideScrcpyJar(char* data, int length);
-extern char* EdgePairWireless(char* host, int port, char* code, char* packageName);
+extern char* EdgePairWireless(char* host, int port, char* code, char* packageName, char* debugHost, int debugPort);
+extern char* EdgeProvisionDeviceOwner(char* debugHost, int debugPort, char* packageName);
 
 #ifdef __cplusplus
 }

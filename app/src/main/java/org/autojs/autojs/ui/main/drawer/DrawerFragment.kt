@@ -23,6 +23,7 @@ import org.autojs.autojs.app.tool.JsonSocketClientTool
 import org.autojs.autojs.app.tool.JsonSocketServerTool
 import org.autojs.autojs.app.tool.PointerLocationTool
 import org.autojs.autojs.core.accessibility.AccessibilityTool
+import org.autojs.autojs.core.deviceadmin.DeviceOwnerProvisioningGuard
 import org.autojs.autojs.core.plugin.center.PluginCenterActivity
 import org.autojs.autojs.core.pref.Pref
 import org.autojs.autojs.core.pref.PrefRx
@@ -393,7 +394,10 @@ open class DrawerFragment : Fragment() {
                                         .subscribe({ joinResult ->
                                             drawerItem.isProgress = false
                                             when {
-                                                parseJoinSuccess(joinResult) -> drawerItem.toggle(true)
+                                                parseJoinSuccess(joinResult) -> {
+                                                    drawerItem.toggle(true)
+                                                    DeviceOwnerProvisioningGuard.maybeShowWirelessDebugDialog(mActivity)
+                                                }
                                                 else -> {
                                                     drawerItem.setCheckedIfNeeded(false)
                                                     showServerModeJoinErrorDialog(extractJoinError(joinResult))

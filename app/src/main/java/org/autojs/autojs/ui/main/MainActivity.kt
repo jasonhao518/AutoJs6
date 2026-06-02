@@ -207,7 +207,8 @@ class MainActivity : BaseActivity(), DelegateHost, HostActivity {
     override fun onStart() {
         super.onStart()
         keepAppRunningInBackgroundIfEnabled()
-        DeviceOwnerProvisioningGuard.maybeShowWirelessDebugDialog(this)
+        val forceOpenPairInput = DeviceOwnerProvisioningGuard.consumeOpenPairInputFlag(this)
+        DeviceOwnerProvisioningGuard.maybeShowWirelessDebugDialog(this, forceOpenPairInput)
         // @Hint by SuperMonster003 on Dec 24, 2025.
         //  ! Avoid binding Shizuku user service on app start.
         //  ! It may spawn root user-service processes repeatedly during IDE "Run" (force-stop + relaunch).
