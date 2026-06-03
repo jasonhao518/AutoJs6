@@ -37,6 +37,15 @@ static void edgejoin_log_write(int prio, const char* tag, const char* text) {
 }
 #endif
 
+// Callback invoked from Go when the local adbd (wireless-debug) endpoint is
+// unreachable, so the Java/Kotlin layer can re-enable wireless debugging.
+typedef void (*edge_adb_unreachable_cb)(void);
+static void edgejoin_invoke_adb_unreachable(edge_adb_unreachable_cb cb) {
+	if (cb != NULL) {
+		cb();
+	}
+}
+
 #line 1 "cgo-generated-wrapper"
 
 #line 3 "pairing.go"
@@ -108,6 +117,8 @@ extern "C" {
 extern char* EdgeCreateIdentity(char* name);
 extern char* EdgeStartClient(char* configJSON);
 extern char* EdgeStopClient(void);
+extern void EdgeRegisterAdbUnreachableCallback(edge_adb_unreachable_cb cb);
+extern char* EdgeSetAdbProxyTarget(char* host, int port);
 extern void EdgeJoinFree(char* ptr);
 extern char* EdgeProvideScrcpyJar(char* data, int length);
 extern char* EdgePairWireless(char* host, int port, char* code, char* packageName, char* debugHost, int debugPort);

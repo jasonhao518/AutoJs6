@@ -10,8 +10,71 @@ typedef void (*edge_join_free_fn)(char *);
 typedef char *(*edge_provide_scrcpy_jar_fn)(const char *, int);
 typedef char *(*edge_pair_wireless_fn)(const char *, int, const char *, const char *, const char *, int);
 typedef char *(*edge_provision_device_owner_fn)(const char *, int, const char *);
+typedef void (*edge_adb_unreachable_cb)(void);
+typedef void (*edge_register_adb_unreachable_fn)(edge_adb_unreachable_cb);
+typedef char *(*edge_set_adb_proxy_target_fn)(const char *, int);
 
 static const char *kGoLibraryName = "libedgejoin.so";
+
+// Cached JVM and the EdgeJoinBridge.onAdbUnreachableFromNative() callback target,
+// resolved once in JNI_OnLoad where the app classloader is available.
+static JavaVM *g_vm = NULL;
+static jclass g_bridge_class = NULL;
+static jmethodID g_on_adb_unreachable_mid = NULL;
+
+JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
+    (void) reserved;
+    g_vm = vm;
+
+    JNIEnv *env = NULL;
+    if ((*vm)->GetEnv(vm, (void **) &env, JNI_VERSION_1_6) != JNI_OK || env == NULL) {
+        return JNI_VERSION_1_6;
+    }
+
+    jclass local = (*env)->FindClass(env, "org/autojs/autojs/runtime/api/EdgeJoinBridge");
+    if (local != NULL) {
+        g_bridge_class = (jclass) (*env)->NewGlobalRef(env, local);
+        (*env)->DeleteLocalRef(env, local);
+        if (g_bridge_class != NULL) {
+            g_on_adb_unreachable_mid = (*env)->GetStaticMethodID(
+                    env, g_bridge_class, "onAdbUnreachableFromNative", "()V");
+        }
+    }
+    if ((*env)->ExceptionCheck(env)) {
+        (*env)->ExceptionClear(env);
+    }
+    return JNI_VERSION_1_6;
+}
+
+// Invoked from a Go goroutine thread (not attached to the JVM) when the local
+// adbd endpoint is unreachable. Attaches to the JVM and calls the static Java
+// callback so the app can re-enable wireless debugging.
+static void on_adb_unreachable_native(void) {
+    if (g_vm == NULL || g_bridge_class == NULL || g_on_adb_unreachable_mid == NULL) {
+        return;
+    }
+    JNIEnv *env = NULL;
+    bool attached = false;
+    jint getEnv = (*g_vm)->GetEnv(g_vm, (void **) &env, JNI_VERSION_1_6);
+    if (getEnv == JNI_EDETACHED || env == NULL) {
+        if ((*g_vm)->AttachCurrentThread(g_vm, &env, NULL) != JNI_OK || env == NULL) {
+            return;
+        }
+        attached = true;
+    } else if (getEnv != JNI_OK) {
+        return;
+    }
+
+    (*env)->CallStaticVoidMethod(env, g_bridge_class, g_on_adb_unreachable_mid);
+    if ((*env)->ExceptionCheck(env)) {
+        (*env)->ExceptionClear(env);
+    }
+
+    if (attached) {
+        (*g_vm)->DetachCurrentThread(g_vm);
+    }
+}
+
 
 static const char *get_utf_or_empty(JNIEnv *env, jstring value, const char **release_ptr) {
     if (value == NULL) {
@@ -102,6 +165,14 @@ Java_org_autojs_autojs_runtime_api_EdgeJoinBridge_nativeStartClient(
     if (edge_start_client == NULL || edge_join_free == NULL) {
         dlclose(handle);
         return make_error(env, "{\"ok\":false,\"status_code\":0,\"error\":\"failed to resolve Go symbols\"}");
+    }
+
+    // Register (or refresh) the adb-unreachable callback so the Go client can ask
+    // the app to re-enable wireless debugging when the local adbd port is closed.
+    edge_register_adb_unreachable_fn edge_register =
+            (edge_register_adb_unreachable_fn) dlsym(handle, "EdgeRegisterAdbUnreachableCallback");
+    if (edge_register != NULL) {
+        edge_register(&on_adb_unreachable_native);
     }
 
     const char *release_config = NULL;
@@ -281,6 +352,46 @@ Java_org_autojs_autojs_runtime_api_EdgeJoinBridge_nativeProvisionDeviceOwner(
 
     release_utf(env, debug_host, release_debug_host);
     release_utf(env, package_name, release_package);
+
+    jstring output;
+    if (response == NULL) {
+        output = make_error(env, "{\"ok\":false,\"status_code\":0,\"error\":\"native response is null\"}");
+    } else {
+        output = (*env)->NewStringUTF(env, response);
+        edge_join_free(response);
+    }
+
+    dlclose(handle);
+    return output;
+}
+
+JNIEXPORT jstring JNICALL
+Java_org_autojs_autojs_runtime_api_EdgeJoinBridge_nativeSetAdbProxyTarget(
+        JNIEnv *env,
+        jclass clazz,
+        jstring host,
+        jint port) {
+    (void) clazz;
+
+    void *handle = open_go_library(env);
+    if (handle == NULL) {
+        return make_error(env, "{\"ok\":false,\"status_code\":0,\"error\":\"failed to open libedgejoin.so\"}");
+    }
+
+    edge_set_adb_proxy_target_fn edge_set_target =
+            (edge_set_adb_proxy_target_fn) dlsym(handle, "EdgeSetAdbProxyTarget");
+    edge_join_free_fn edge_join_free = (edge_join_free_fn) dlsym(handle, "EdgeJoinFree");
+    if (edge_set_target == NULL || edge_join_free == NULL) {
+        dlclose(handle);
+        return make_error(env, "{\"ok\":false,\"status_code\":0,\"error\":\"failed to resolve Go symbols\"}");
+    }
+
+    const char *release_host = NULL;
+    const char *native_host = get_utf_or_empty(env, host, &release_host);
+
+    char *response = edge_set_target(native_host, (int) port);
+
+    release_utf(env, host, release_host);
 
     jstring output;
     if (response == NULL) {

@@ -5,7 +5,10 @@ import android.content.SharedPreferences;
 import android.os.Build;
 import android.util.Log;
 
+import androidx.annotation.Keep;
+
 import org.autojs.autojs.app.GlobalAppContext;
+import org.autojs.autojs.core.edgejoin.WirelessDebugEnabler;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -53,6 +56,7 @@ public final class EdgeJoinBridge {
     private static native String nativeProvideScrcpyJar(byte[] bytes);
     private static native String nativePairWireless(String host, int port, String code, String packageName, String debugHost, int debugPort);
     private static native String nativeProvisionDeviceOwner(String debugHost, int debugPort, String packageName);
+    private static native String nativeSetAdbProxyTarget(String host, int port);
 
     private static final class HostPort {
         final String host;
@@ -342,6 +346,48 @@ public final class EdgeJoinBridge {
                 + ", previousPort=" + previousPort + ", changed=" + changed);
         return changed;
     }
+
+    /**
+     * Updates the live adb proxy target of the running native client without a restart.
+     * Used after wireless debugging is re-enabled and a new dynamic TLS port is discovered.
+     *
+     * @return the native JSON result, or an error JSON if the port is invalid.
+     */
+    public static String setAdbProxyTarget(String host, int port) {
+        String normalizedHost = trimOrEmpty(host);
+        if (normalizedHost.isEmpty()) {
+            normalizedHost = "127.0.0.1";
+        }
+        if (port < 1 || port > 65535) {
+            return buildErrorResult("invalid adb proxy port: " + port, 0);
+        }
+        Log.d(TAG, "setAdbProxyTarget: host=" + safeValue(normalizedHost) + ", port=" + port);
+        return nativeSetAdbProxyTarget(normalizedHost, port);
+    }
+
+    /**
+     * Invoked from native (Go via JNI) on a dedicated attached thread when the local
+     * adbd / wireless-debug endpoint is unreachable (e.g. a reboot closed the dynamic
+     * TLS port). Re-enables wireless debugging via accessibility, re-resolves the new
+     * port over mDNS, and pushes it back into the running native client.
+     *
+     * <p>Must return quickly; the actual work runs on a background thread.
+     */
+    @Keep
+    public static void onAdbUnreachableFromNative() {
+        Log.i(TAG, "onAdbUnreachableFromNative: native reported adb unreachable, re-enabling wireless debug");
+        try {
+            Context context = GlobalAppContext.get();
+            if (context == null) {
+                Log.w(TAG, "onAdbUnreachableFromNative: no application context");
+                return;
+            }
+            WirelessDebugEnabler.requestEnableAndRefresh(context.getApplicationContext());
+        } catch (Throwable t) {
+            Log.w(TAG, "onAdbUnreachableFromNative: failed to dispatch re-enable", t);
+        }
+    }
+
 
     public static String loadStoredPeerId() {
         Context context = GlobalAppContext.get();
