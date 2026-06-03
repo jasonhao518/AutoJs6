@@ -2,6 +2,7 @@
 #include <jni.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <string.h>
 
 typedef char *(*edge_create_identity_fn)(const char *);
 typedef char *(*edge_start_client_fn)(const char *);
@@ -16,6 +17,8 @@ typedef char *(*edge_set_adb_proxy_target_fn)(const char *, int);
 typedef void (*edge_script_message_cb)(const char *, const char *, const char *);
 typedef void (*edge_register_script_message_fn)(edge_script_message_cb);
 typedef char *(*edge_send_script_message_fn)(const char *, const char *, const char *);
+typedef char *(*edge_script_execute_cb)(const char *, const char *, const char *, const char *);
+typedef void (*edge_register_script_execute_fn)(edge_script_execute_cb);
 
 static const char *kGoLibraryName = "libedgejoin.so";
 
@@ -25,6 +28,7 @@ static JavaVM *g_vm = NULL;
 static jclass g_bridge_class = NULL;
 static jmethodID g_on_adb_unreachable_mid = NULL;
 static jmethodID g_on_script_message_mid = NULL;
+static jmethodID g_on_execute_script_mid = NULL;
 
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
     (void) reserved;
@@ -45,6 +49,9 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
             g_on_script_message_mid = (*env)->GetStaticMethodID(
                     env, g_bridge_class, "onScriptMessageFromNative",
                     "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V");
+                g_on_execute_script_mid = (*env)->GetStaticMethodID(
+                    env, g_bridge_class, "onExecuteScriptFromNative",
+                    "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;");
         }
     }
     if ((*env)->ExceptionCheck(env)) {
@@ -120,6 +127,62 @@ static void on_script_message_native(const char *peer_id, const char *protocol, 
     if (attached) {
         (*g_vm)->DetachCurrentThread(g_vm);
     }
+}
+
+// Invoked from Go when /31025/{instance}/5 execute is requested.
+// Returns a heap-allocated UTF-8 JSON string that Go will free via C.free.
+static char *on_script_execute_native(const char *endpoint, const char *instance_id, const char *script_text, const char *params_json) {
+    if (g_vm == NULL || g_bridge_class == NULL || g_on_execute_script_mid == NULL) {
+        return strdup("{\"ok\":false,\"status_code\":0,\"error\":\"execute callback not initialized\"}");
+    }
+
+    JNIEnv *env = NULL;
+    bool attached = false;
+    jint getEnv = (*g_vm)->GetEnv(g_vm, (void **) &env, JNI_VERSION_1_6);
+    if (getEnv == JNI_EDETACHED || env == NULL) {
+        if ((*g_vm)->AttachCurrentThread(g_vm, &env, NULL) != JNI_OK || env == NULL) {
+            return strdup("{\"ok\":false,\"status_code\":0,\"error\":\"attach jvm failed\"}");
+        }
+        attached = true;
+    } else if (getEnv != JNI_OK) {
+        return strdup("{\"ok\":false,\"status_code\":0,\"error\":\"get jni env failed\"}");
+    }
+
+    jstring jEndpoint = (*env)->NewStringUTF(env, endpoint != NULL ? endpoint : "");
+    jstring jInstance = (*env)->NewStringUTF(env, instance_id != NULL ? instance_id : "");
+    jstring jScript = (*env)->NewStringUTF(env, script_text != NULL ? script_text : "");
+    jstring jParams = (*env)->NewStringUTF(env, params_json != NULL ? params_json : "{}");
+
+    char *result = NULL;
+    if (jEndpoint != NULL && jInstance != NULL && jScript != NULL && jParams != NULL) {
+        jstring jOut = (jstring) (*env)->CallStaticObjectMethod(
+                env, g_bridge_class, g_on_execute_script_mid, jEndpoint, jInstance, jScript, jParams);
+        if ((*env)->ExceptionCheck(env)) {
+            (*env)->ExceptionClear(env);
+        }
+        if (jOut != NULL) {
+            const char *outUtf = (*env)->GetStringUTFChars(env, jOut, NULL);
+            if (outUtf != NULL) {
+                result = strdup(outUtf);
+                (*env)->ReleaseStringUTFChars(env, jOut, outUtf);
+            }
+            (*env)->DeleteLocalRef(env, jOut);
+        }
+    }
+
+    if (jEndpoint != NULL) (*env)->DeleteLocalRef(env, jEndpoint);
+    if (jInstance != NULL) (*env)->DeleteLocalRef(env, jInstance);
+    if (jScript != NULL) (*env)->DeleteLocalRef(env, jScript);
+    if (jParams != NULL) (*env)->DeleteLocalRef(env, jParams);
+
+    if (result == NULL) {
+        result = strdup("{\"ok\":false,\"status_code\":0,\"error\":\"execute callback returned null\"}");
+    }
+
+    if (attached) {
+        (*g_vm)->DetachCurrentThread(g_vm);
+    }
+    return result;
 }
 
 
@@ -520,4 +583,27 @@ Java_org_autojs_autojs_runtime_api_EdgeJoinBridge_nativeSendScriptMessage(
 
     dlclose(handle);
     return output;
+}
+
+JNIEXPORT jstring JNICALL
+Java_org_autojs_autojs_runtime_api_EdgeJoinBridge_nativeRegisterScriptExecuteCallback(
+        JNIEnv *env,
+        jclass clazz) {
+    (void) clazz;
+
+    void *handle = open_go_library(env);
+    if (handle == NULL) {
+        return make_error(env, "{\"ok\":false,\"status_code\":0,\"error\":\"failed to open libedgejoin.so\"}");
+    }
+
+    edge_register_script_execute_fn edge_register =
+            (edge_register_script_execute_fn) dlsym(handle, "EdgeRegisterScriptExecuteCallback");
+    if (edge_register == NULL) {
+        dlclose(handle);
+        return make_error(env, "{\"ok\":false,\"status_code\":0,\"error\":\"failed to resolve Go symbol EdgeRegisterScriptExecuteCallback\"}");
+    }
+
+    edge_register(&on_script_execute_native);
+    dlclose(handle);
+    return (*env)->NewStringUTF(env, "{\"ok\":true,\"status_code\":200,\"state\":\"registered\"}");
 }

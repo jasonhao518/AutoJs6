@@ -7,12 +7,18 @@ import android.util.Log;
 
 import androidx.annotation.Keep;
 
+import org.autojs.autojs.AutoJs;
 import org.autojs.autojs.app.GlobalAppContext;
 import org.autojs.autojs.core.edgejoin.WirelessDebugEnabler;
+import org.autojs.autojs.execution.ExecutionConfig;
+import org.autojs.autojs.execution.ScriptExecution;
+import org.autojs.autojs.script.JavaScriptFileSource;
+import org.autojs.autojs.script.StringScriptSource;
 import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Set;
@@ -61,6 +67,12 @@ public final class EdgeJoinBridge {
         } catch (Throwable t) {
             Log.w(TAG, scoped("nativeRegisterScriptMessageCallback failed"), t);
         }
+        try {
+            String resp = nativeRegisterScriptExecuteCallback();
+            Log.d(TAG, scoped("nativeRegisterScriptExecuteCallback: resp=" + resp));
+        } catch (Throwable t) {
+            Log.w(TAG, scoped("nativeRegisterScriptExecuteCallback failed"), t);
+        }
     }
 
     private EdgeJoinBridge() {
@@ -75,6 +87,7 @@ public final class EdgeJoinBridge {
     private static native String nativeSetAdbProxyTarget(String host, int port);
     private static native String nativeRegisterScriptMessageCallback();
     private static native String nativeSendScriptMessage(String peerId, String protocol, String payload);
+    private static native String nativeRegisterScriptExecuteCallback();
 
     public interface ScriptMessageListener {
         void onMessage(String peerId, String protocol, String payload);
@@ -464,6 +477,77 @@ public final class EdgeJoinBridge {
         }
     }
 
+    @Keep
+    public static String onExecuteScriptFromNative(String endpoint, String instanceId, String scriptText, String paramsJson) {
+        String safeEndpoint = trimOrEmpty(endpoint);
+        if (safeEndpoint.isEmpty()) {
+            safeEndpoint = DEFAULT_CLIENT_ENDPOINT;
+        }
+        String safeInstance = trimOrEmpty(instanceId);
+        String safeScript = scriptText == null ? "" : scriptText;
+        String safeParams = trimOrEmpty(paramsJson);
+        if (safeParams.isEmpty()) {
+            safeParams = "{}";
+        }
+        if (trimOrEmpty(safeScript).isEmpty()) {
+            return buildErrorResult("script source is empty", 0);
+        }
+
+        try {
+            ExecutionConfig config = new ExecutionConfig();
+            config.setWorkingDirectory("/sdcard/Scripts/DriverSync/" + sanitizeFileName(safeEndpoint));
+
+            File persistedScript = resolveDriverSyncScriptFile(safeEndpoint, safeInstance);
+            ScriptExecution execution;
+            if (persistedScript != null) {
+                execution = AutoJs.getInstance()
+                        .getScriptEngineService()
+                        .execute(new JavaScriptFileSource(persistedScript.getAbsolutePath()), config);
+            } else {
+                String scriptName = "driver-sync-" + (safeInstance.isEmpty() ? "unknown" : sanitizeFileName(safeInstance));
+                execution = AutoJs.getInstance()
+                        .getScriptEngineService()
+                        .execute(new StringScriptSource(scriptName, safeScript), config);
+            }
+
+            JSONObject result = new JSONObject();
+            result.put("ok", true);
+            result.put("status_code", 200);
+            result.put("state", "launched");
+            result.put("endpoint", safeEndpoint);
+            result.put("instanceId", safeInstance);
+            result.put("params", new JSONObject(safeParams));
+            if (execution != null) {
+                result.put("executionId", execution.getId());
+            }
+            if (persistedScript != null) {
+                result.put("scriptFile", persistedScript.getAbsolutePath());
+            }
+            return result.toString();
+        } catch (Throwable t) {
+            Log.w(TAG, scoped("onExecuteScriptFromNative failed"), t);
+            return buildErrorResult("execute script failed: " + t.getMessage(), 0);
+        }
+    }
+
+    private static File resolveDriverSyncScriptFile(String endpoint, String instanceId) {
+        String safeEndpoint = sanitizeFileName(endpoint);
+        String safeInstance = sanitizeFileName(instanceId);
+        if (safeInstance.isEmpty() || "default".equals(safeInstance)) {
+            return null;
+        }
+        File dir = new File("/sdcard/Scripts/DriverSync", safeEndpoint);
+        if (!dir.isDirectory()) {
+            return null;
+        }
+        String prefix = safeInstance + "__";
+        File[] candidates = dir.listFiles((d, name) -> name.startsWith(prefix) && name.endsWith(".js"));
+        if (candidates == null || candidates.length == 0) {
+            return null;
+        }
+        return candidates[0];
+    }
+
 
     public static String loadStoredPeerId() {
         Context context = GlobalAppContext.get();
@@ -529,6 +613,14 @@ public final class EdgeJoinBridge {
         }
         String deviceName = trimOrEmpty(Build.MODEL);
         return deviceName.isEmpty() ? "android-device" : deviceName;
+    }
+
+    private static String sanitizeFileName(String value) {
+        String normalized = trimOrEmpty(value);
+        if (normalized.isEmpty()) {
+            return "default";
+        }
+        return normalized.replaceAll("[^a-zA-Z0-9._-]", "_");
     }
 
     private static String primaryAbi() {

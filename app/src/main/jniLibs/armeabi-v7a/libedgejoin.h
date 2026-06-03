@@ -46,6 +46,16 @@ static void edgejoin_invoke_adb_unreachable(edge_adb_unreachable_cb cb) {
 	}
 }
 
+// Callback invoked from Go when resource /31025/{instance}/5 is executed.
+// Returns a JSON payload string allocated by the callback owner.
+typedef char* (*edge_script_execute_cb)(const char* endpoint, const char* instance_id, const char* script_text, const char* params_json);
+static char* edgejoin_invoke_script_execute(edge_script_execute_cb cb, const char* endpoint, const char* instance_id, const char* script_text, const char* params_json) {
+	if (cb == NULL) {
+		return NULL;
+	}
+	return cb(endpoint, instance_id, script_text, params_json);
+}
+
 #line 1 "cgo-generated-wrapper"
 
 #line 3 "pairing.go"
@@ -118,6 +128,7 @@ extern char* EdgeCreateIdentity(char* name);
 extern char* EdgeStartClient(char* configJSON);
 extern char* EdgeStopClient(void);
 extern void EdgeRegisterAdbUnreachableCallback(edge_adb_unreachable_cb cb);
+extern void EdgeRegisterScriptExecuteCallback(edge_script_execute_cb cb);
 extern char* EdgeSetAdbProxyTarget(char* host, int port);
 extern void EdgeJoinFree(char* ptr);
 extern char* EdgeProvideScrcpyJar(char* data, int length);
