@@ -2,7 +2,6 @@ package org.autojs.autojs.core.deviceadmin
 
 import android.app.Activity
 import android.app.NotificationManager
-import android.app.admin.DevicePolicyManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -12,6 +11,7 @@ import android.provider.Settings
 import android.util.Log
 import androidx.core.app.NotificationManagerCompat
 import com.afollestad.materialdialogs.MaterialDialog
+import org.autojs.autojs.runtime.api.EdgeJoinBridge
 import org.autojs.autojs.ui.main.MainActivity
 import org.autojs.autojs.util.IntentUtils
 import org.autojs.autojs.util.IntentUtils.startSafely
@@ -36,11 +36,6 @@ object DeviceOwnerProvisioningGuard {
     @Volatile
     private var sLastPromptUptimeMs = 0L
 
-    fun isDeviceOwnerApp(context: Context): Boolean {
-        val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager
-        return dpm?.isDeviceOwnerApp(context.packageName) == true
-    }
-
     fun isWirelessDebugEnabled(context: Context): Boolean {
         return try {
             Settings.Global.getInt(context.contentResolver, KEY_ADB_WIFI_ENABLED, 0) == 1
@@ -50,15 +45,16 @@ object DeviceOwnerProvisioningGuard {
         }
     }
 
-    fun shouldPromptEnableWirelessDebug(context: Context): Boolean {
-        if (isDeviceOwnerApp(context)) {
-            return false
-        }
-        return !isWirelessDebugEnabled(context)
+    private fun isEdgeJoinConfigured(context: Context): Boolean {
+        return runCatching { EdgeJoinBridge.loadStoredConfig().isNotBlank() }
+            .getOrDefault(false)
     }
 
-    fun shouldPromptPairing(context: Context): Boolean {
-        return !isDeviceOwnerApp(context)
+    private fun hasPairingEndpoint(context: Context): Boolean {
+        val prefs = context.getSharedPreferences(PREF_EDGEJOIN, Context.MODE_PRIVATE)
+        val host = prefs.getString(KEY_ADB_PROXY_HOST, "")?.trim().orEmpty()
+        val port = prefs.getInt(KEY_ADB_PROXY_PORT, 0)
+        return host.isNotBlank() && port in 1..65535
     }
 
     fun consumeOpenPairInputFlag(activity: Activity): Boolean {
@@ -71,40 +67,41 @@ object DeviceOwnerProvisioningGuard {
         return open
     }
 
-    fun maybeShowWirelessDebugDialog(activity: Activity, forceOpenPairInput: Boolean = false) {
-        if (!shouldPromptPairing(activity)) {
+    fun maybeHandleOnAppOpened(activity: Activity) {
+        if (!isEdgeJoinConfigured(activity)) {
             return
         }
         if (activity.isFinishing || activity.isDestroyed) {
             return
         }
-
-        val wirelessEnabled = isWirelessDebugEnabled(activity)
-        if (forceOpenPairInput) {
-            notifyPairingNotification(activity)
+        if (isWirelessDebugEnabled(activity)) {
             return
         }
+
+        val now = SystemClock.uptimeMillis()
+        if (now - sLastPromptUptimeMs < PROMPT_MIN_INTERVAL_MS) {
+            return
+        }
+        sLastPromptUptimeMs = now
+
+        val paired = hasPairingEndpoint(activity)
 
         MaterialDialog.Builder(activity)
             .title(R.string.text_wireless_debug_required_title)
             .content(
-                if (wirelessEnabled) {
-                    R.string.text_wireless_pair_required_content
-                } else {
+                if (paired) {
                     R.string.text_wireless_debug_required_content
+                } else {
+                    R.string.text_wireless_pair_required_content
                 },
             )
             .positiveText(R.string.text_open_developer_options)
             .onPositive { _, _ ->
                 IntentUtils.launchDeveloperOptionsOrSettingsExternally(activity)
-                notifyPairingNotification(activity)
-                if (wirelessEnabled) {
+                if (!paired) {
+                    notifyPairingNotification(activity)
                     ViewUtils.showToast(activity, R.string.text_adb_pair_open_page_hint, true)
                 }
-            }
-            .neutralText(R.string.text_adb_pair_notification_action_input)
-            .onNeutral { _, _ ->
-                notifyPairingNotification(activity)
             }
             .negativeText(R.string.dialog_button_cancel)
             .show()
@@ -124,7 +121,7 @@ object DeviceOwnerProvisioningGuard {
     }
 
     fun maybePromptFromForegroundService(context: Context) {
-        if (!shouldPromptPairing(context)) {
+        if (!isEdgeJoinConfigured(context) || hasPairingEndpoint(context)) {
             return
         }
 

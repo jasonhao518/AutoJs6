@@ -129,15 +129,11 @@ public final class EdgeJoinBridge {
 
         persistAdbProxyEndpoint(debug.host, debug.port);
 
-        Context context = GlobalAppContext.get();
-        String packageName = context != null ? trimOrEmpty(context.getPackageName()) : "";
-        if (packageName.isEmpty()) {
-            return buildErrorResult("application context unavailable", 0);
-        }
-
+        // Pairing-only mode: do not run `dpm set-device-owner` here.
+        // Native side skips device-owner provisioning when packageName is empty.
         Log.d(TAG, "pairWirelessAndProvision: pair=" + pair.host + ":" + pair.port
-                + ", debug=" + debug.host + ":" + debug.port + ", package=" + packageName);
-        return nativePairWireless(pair.host, pair.port, normalizedCode, packageName, debug.host, debug.port);
+            + ", debug=" + debug.host + ":" + debug.port + ", package=(pair-only)");
+        return nativePairWireless(pair.host, pair.port, normalizedCode, "", debug.host, debug.port);
     }
 
     /**

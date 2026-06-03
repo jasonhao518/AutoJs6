@@ -75,12 +75,7 @@ class EdgeJoinPairingActionReceiver : BroadcastReceiver() {
                     throw IllegalStateException(error)
                 }
 
-                val state = result.optString("state", "")
-                val message = when (state) {
-                    "paired_device_owner" -> appContext.getString(R.string.text_adb_pair_device_owner_ready)
-                    "paired_no_device_owner" -> appContext.getString(R.string.text_adb_pair_only_success)
-                    else -> appContext.getString(R.string.text_adb_pair_success)
-                }
+                val message = appContext.getString(R.string.text_adb_pair_success)
                 postResultNotification(appContext, message, false)
             }.onFailure { t ->
                 Log.w(TAG, "Inline notification pairing failed", t)

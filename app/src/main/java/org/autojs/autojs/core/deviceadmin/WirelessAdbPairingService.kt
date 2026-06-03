@@ -141,21 +141,7 @@ class WirelessAdbPairingService : Service() {
                         ?: getString(R.string.error_adb_pair_failed)
                     throw IllegalStateException(error)
                 }
-
-                var state = json.optString("state", "")
-                // Pairing succeeded but the device-owner step did not complete.
-                // The connect channel is often not ready in the same instant
-                // pairing finishes, so retry the `dpm set-device-owner` step a
-                // few times over the now-trusted wireless-debug channel.
-                if (state == "paired_no_device_owner") {
-                    state = retryProvisionDeviceOwner(debugEndpoint) ?: state
-                }
-
-                val message = when (state) {
-                    "paired_device_owner" -> getString(R.string.text_adb_pair_device_owner_ready)
-                    "paired_no_device_owner" -> getString(R.string.text_adb_pair_only_success)
-                    else -> getString(R.string.text_adb_pair_success)
-                }
+                val message = getString(R.string.text_adb_pair_success)
                 postResult(message, isError = false)
             }.onFailure { t ->
                 Log.w(TAG, "onInput: pairing failed", t)
@@ -189,31 +175,6 @@ class WirelessAdbPairingService : Service() {
         return null
     }
 
-    /**
-     * Retry the standalone `dpm set-device-owner` step over the trusted
-     * wireless-debug channel. Returns the resulting state, or null if every
-     * attempt failed (caller keeps the original state).
-     */
-    private fun retryProvisionDeviceOwner(debugEndpoint: String): String? {
-        repeat(PROVISION_RETRY_COUNT) { attempt ->
-            if (attempt > 0) {
-                try {
-                    Thread.sleep(PROVISION_RETRY_DELAY_MS)
-                } catch (e: InterruptedException) {
-                    Thread.currentThread().interrupt()
-                    return null
-                }
-            }
-            val response = EdgeJoinBridge.provisionDeviceOwner(debugEndpoint)
-            val json = runCatching { JSONObject(response) }.getOrNull()
-            if (json?.optBoolean("ok", false) == true) {
-                Log.i(TAG, "retryProvisionDeviceOwner: succeeded on attempt ${attempt + 1}")
-                return json.optString("state", "paired_device_owner")
-            }
-            Log.w(TAG, "retryProvisionDeviceOwner: attempt ${attempt + 1} failed: $response")
-        }
-        return null
-    }
 
     private fun postResult(message: String, isError: Boolean) {
         stopSearch()
@@ -397,8 +358,6 @@ class WirelessAdbPairingService : Service() {
         private const val KEY_ADB_PROXY_HOST = "adb_proxy_host"
         private const val KEY_ADB_PROXY_PORT = "adb_proxy_port"
 
-        private const val PROVISION_RETRY_COUNT = 4
-        private const val PROVISION_RETRY_DELAY_MS = 1_500L
 
         @JvmStatic
         fun startIntent(context: Context): Intent {
