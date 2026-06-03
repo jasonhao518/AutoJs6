@@ -39,6 +39,7 @@ public final class EdgeJoinBridge {
     private static final String KEY_JOIN_RESPONSE = "join_response";
     private static final String KEY_JOIN_KEY = "join_key";
     private static final String KEY_SERIAL_NUMBER = "serial_number";
+    private static final String DEFAULT_CLIENT_ENDPOINT = "jason-android";
     private static final String KEY_ADB_PROXY_HOST = "adb_proxy_host";
     private static final String KEY_ADB_PROXY_PORT = "adb_proxy_port";
 
@@ -322,6 +323,20 @@ public final class EdgeJoinBridge {
                 config = configJson.toString();
             } catch (JSONException e) {
                 Log.w(TAG, "loadStoredConfig: failed to merge adb proxy config", e);
+            }
+        }
+
+        String serialNumber = trimOrEmpty(preferences.getString(KEY_SERIAL_NUMBER, ""));
+        if (serialNumber.isEmpty()) {
+            serialNumber = DEFAULT_CLIENT_ENDPOINT;
+        }
+        if (!config.isEmpty()) {
+            try {
+                JSONObject configJson = new JSONObject(config);
+                configJson.put(KEY_SERIAL_NUMBER, serialNumber);
+                config = configJson.toString();
+            } catch (JSONException e) {
+                Log.w(TAG, "loadStoredConfig: failed to merge serial_number", e);
             }
         }
 
