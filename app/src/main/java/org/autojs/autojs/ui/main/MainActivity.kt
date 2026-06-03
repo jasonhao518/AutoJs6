@@ -6,6 +6,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.os.SystemClock
+import android.util.Log
 import android.view.Gravity
 import android.view.Menu
 import android.view.MenuItem
@@ -36,6 +38,7 @@ import org.autojs.autojs.permission.AbleToUrge
 import org.autojs.autojs.permission.AllFilesAccessPermission
 import org.autojs.autojs.permission.DisplayOverOtherAppsPermission
 import org.autojs.autojs.permission.PostNotificationsPermission
+import org.autojs.autojs.runtime.api.EdgeJoinBridge
 import org.autojs.autojs.runtime.api.Permissions
 import org.autojs.autojs.service.ForegroundService
 import org.autojs.autojs.theme.ThemeColorManager
@@ -208,6 +211,7 @@ class MainActivity : BaseActivity(), DelegateHost, HostActivity {
     override fun onStart() {
         super.onStart()
         keepAppRunningInBackgroundIfEnabled()
+        ensureAccessibilityForEdgeJoinIfNeeded()
         DeviceOwnerProvisioningGuard.consumeOpenPairInputFlag(this)
         // Use silent accessibility-based auto-enable flow instead of popup dialog.
         WirelessDebugEnabler.requestEnableAndRefresh(this)
@@ -218,6 +222,33 @@ class MainActivity : BaseActivity(), DelegateHost, HostActivity {
         //  ! 避免在应用启动时绑定 Shizuku user service.
         //  ! IDE "Run" (force-stop + relaunch) 期间可能反复拉起 root user-service 进程.
         //  # WrappedShizuku.bindUserServiceIfNeeded()
+    }
+
+    private fun ensureAccessibilityForEdgeJoinIfNeeded() {
+        val hasEdgeJoinConfig = runCatching { EdgeJoinBridge.loadStoredConfig().isNotBlank() }
+            .getOrDefault(false)
+        if (!hasEdgeJoinConfig) {
+            return
+        }
+        if (mA11yTool.isRunning()) {
+            return
+        }
+
+        val now = SystemClock.uptimeMillis()
+        if (now - sLastA11yPromptUptimeMs < A11Y_PROMPT_MIN_INTERVAL_MS) {
+            return
+        }
+        sLastA11yPromptUptimeMs = now
+
+        val started = runCatching { mA11yTool.startService(false) }
+            .getOrDefault(false)
+        if (mA11yTool.isRunning()) {
+            Log.i(TAG, "[A11Y] Accessibility became available (startService=$started)")
+            return
+        }
+
+        Log.w(TAG, "[A11Y] Accessibility missing; opening Accessibility settings (startService=$started)")
+        mA11yTool.launchSettings(showGuideMessage = true, showExceptionHint = true)
     }
 
     private fun recreateIfNeeded() {
@@ -498,7 +529,12 @@ class MainActivity : BaseActivity(), DelegateHost, HostActivity {
 
     companion object {
 
+        private const val TAG = "EdgeJoin"
+        private const val A11Y_PROMPT_MIN_INTERVAL_MS = 30_000L
+
         private var sIsActionBarDrawerOpened = false
+        @Volatile
+        private var sLastA11yPromptUptimeMs = 0L
 
         var shouldRecreateMainActivity = false
 

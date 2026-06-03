@@ -9,6 +9,7 @@ import android.os.Looper
 import android.provider.Settings
 import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
+import org.autojs.autojs.core.accessibility.AccessibilityTool
 import com.stardust.view.accessibility.AccessibilityService
 import org.autojs.autojs.runtime.api.EdgeJoinBridge
 import java.util.concurrent.CountDownLatch
@@ -40,6 +41,7 @@ object WirelessDebugEnabler {
     private const val PORT_RESOLVE_ATTEMPTS = 4
     private const val PORT_RESOLVE_TIMEOUT_MS = 5_000L
     private const val POST_TOGGLE_SETTLE_MS = 1_500L
+    private const val A11Y_WAIT_AFTER_START_MS = 1_500L
     private const val TREE_LOG_MAX_DEPTH = 3
     private const val TREE_LOG_MAX_CHILDREN = 6
 
@@ -110,6 +112,11 @@ object WirelessDebugEnabler {
     }
 
     private fun openSettingsAndToggle(context: Context): Boolean {
+        if (!ensureAccessibilityReady(context)) {
+            Log.w(TAG, scoped("openSettingsAndToggle: accessibility unavailable; requested Accessibility settings first, skipping Developer options for now"))
+            return false
+        }
+
         if (!launchWirelessDebuggingSettings(context)) {
             return false
         }
@@ -165,6 +172,40 @@ object WirelessDebugEnabler {
         }
 
         return isWirelessDebugEnabled(context)
+    }
+
+    private fun ensureAccessibilityReady(context: Context): Boolean {
+        if (AccessibilityService.instance != null) {
+            Log.i(TAG, scoped("ensureAccessibilityReady: accessibility service already running"))
+            return true
+        }
+
+        Log.w(TAG, scoped("ensureAccessibilityReady: accessibility service is not running, attempting programmatic start"))
+        try {
+            val tool = AccessibilityTool(context)
+            val started = tool.startService(false)
+            val ready = AccessibilityService.waitForEnabled(A11Y_WAIT_AFTER_START_MS)
+            Log.i(TAG, scoped("ensureAccessibilityReady: startService=$started waitForEnabled=$ready"))
+            if (AccessibilityService.instance != null) {
+                return true
+            }
+            Log.w(TAG, scoped("ensureAccessibilityReady: opening Accessibility settings before Developer options"))
+            tool.launchSettings(showGuideMessage = true, showExceptionHint = true)
+        } catch (t: Throwable) {
+            Log.w(TAG, scoped("ensureAccessibilityReady: start attempt failed"), t)
+        }
+
+        if (AccessibilityService.instance == null) {
+            Log.w(
+                TAG,
+                scoped(
+                    "ensureAccessibilityReady: accessibility still unavailable. " +
+                        "Enable AutoJs accessibility service in system Accessibility settings.",
+                ),
+            )
+            return false
+        }
+        return true
     }
 
     private fun launchWirelessDebuggingSettings(context: Context): Boolean {
