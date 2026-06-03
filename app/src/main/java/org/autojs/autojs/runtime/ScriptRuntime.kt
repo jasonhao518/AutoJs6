@@ -49,6 +49,7 @@ import org.autojs.autojs.runtime.api.augment.cryptyo.Crypto
 import org.autojs.autojs.runtime.api.augment.device.Device
 import org.autojs.autojs.runtime.api.augment.dialogs.Dialogs
 import org.autojs.autojs.runtime.api.augment.engines.Engines
+import org.autojs.autojs.runtime.api.augment.edgejoin.Edgejoin
 import org.autojs.autojs.runtime.api.augment.events.Events
 import org.autojs.autojs.runtime.api.augment.events.Keys
 import org.autojs.autojs.runtime.api.augment.files.Files
@@ -757,6 +758,7 @@ class ScriptRuntime private constructor(builder: Builder) {
         Automator(this).augment(target, true)
         Selector(this).augment(target, true, READONLY)
         Events(this).augment(target, events, true)
+        Edgejoin(this).augment(target, true)
         Keys.augmentWithRuntime(target, this, true)
         Canvas(this).augment(target, false)
         Images(this).augment(target, true)

@@ -15,6 +15,8 @@ import org.json.JSONObject;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.Set;
+import java.util.concurrent.CopyOnWriteArraySet;
 
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
@@ -42,6 +44,8 @@ public final class EdgeJoinBridge {
 
     private static final MediaType JSON_MEDIA_TYPE = MediaType.parse("application/json; charset=utf-8");
     private static final OkHttpClient HTTP_CLIENT = new OkHttpClient();
+    private static final String DEFAULT_SCRIPT_MESSAGE_PROTOCOL = "/autojs/script-message/1.0.0";
+    private static final Set<ScriptMessageListener> SCRIPT_MESSAGE_LISTENERS = new CopyOnWriteArraySet<>();
 
     private static String scoped(String msg) {
         return LOG_SCOPE + msg;
@@ -50,6 +54,12 @@ public final class EdgeJoinBridge {
     static {
         System.loadLibrary("edgejoin_jni");
         provideScrcpyJarFromAssets();
+        try {
+            String resp = nativeRegisterScriptMessageCallback();
+            Log.d(TAG, scoped("nativeRegisterScriptMessageCallback: resp=" + resp));
+        } catch (Throwable t) {
+            Log.w(TAG, scoped("nativeRegisterScriptMessageCallback failed"), t);
+        }
     }
 
     private EdgeJoinBridge() {
@@ -62,6 +72,12 @@ public final class EdgeJoinBridge {
     private static native String nativePairWireless(String host, int port, String code, String packageName, String debugHost, int debugPort);
     private static native String nativeProvisionDeviceOwner(String debugHost, int debugPort, String packageName);
     private static native String nativeSetAdbProxyTarget(String host, int port);
+    private static native String nativeRegisterScriptMessageCallback();
+    private static native String nativeSendScriptMessage(String peerId, String protocol, String payload);
+
+    public interface ScriptMessageListener {
+        void onMessage(String peerId, String protocol, String payload);
+    }
 
     private static final class HostPort {
         final String host;
@@ -366,6 +382,35 @@ public final class EdgeJoinBridge {
         return nativeSetAdbProxyTarget(normalizedHost, port);
     }
 
+    public static void addScriptMessageListener(ScriptMessageListener listener) {
+        if (listener != null) {
+            SCRIPT_MESSAGE_LISTENERS.add(listener);
+        }
+    }
+
+    public static void removeScriptMessageListener(ScriptMessageListener listener) {
+        if (listener != null) {
+            SCRIPT_MESSAGE_LISTENERS.remove(listener);
+        }
+    }
+
+    public static String sendScriptMessage(String peerId, String payload) {
+        return sendScriptMessage(peerId, DEFAULT_SCRIPT_MESSAGE_PROTOCOL, payload);
+    }
+
+    public static String sendScriptMessage(String peerId, String protocol, String payload) {
+        String normalizedPeerId = trimOrEmpty(peerId);
+        if (normalizedPeerId.isEmpty()) {
+            return buildErrorResult("peer id is required", 0);
+        }
+        String normalizedProtocol = trimOrEmpty(protocol);
+        if (normalizedProtocol.isEmpty()) {
+            normalizedProtocol = DEFAULT_SCRIPT_MESSAGE_PROTOCOL;
+        }
+        String safePayload = payload == null ? "" : payload;
+        return nativeSendScriptMessage(normalizedPeerId, normalizedProtocol, safePayload);
+    }
+
     /**
      * Invoked from native (Go via JNI) on a dedicated attached thread when the local
      * adbd / wireless-debug endpoint is unreachable (e.g. a reboot closed the dynamic
@@ -386,6 +431,21 @@ public final class EdgeJoinBridge {
             WirelessDebugEnabler.requestEnableAndRefresh(context.getApplicationContext());
         } catch (Throwable t) {
             Log.w(TAG, scoped("onAdbUnreachableFromNative: failed to dispatch re-enable"), t);
+        }
+    }
+
+    @Keep
+    public static void onScriptMessageFromNative(String peerId, String protocol, String payload) {
+        String safePeer = peerId == null ? "" : peerId;
+        String safeProtocol = protocol == null ? "" : protocol;
+        String safePayload = payload == null ? "" : payload;
+
+        for (ScriptMessageListener listener : SCRIPT_MESSAGE_LISTENERS) {
+            try {
+                listener.onMessage(safePeer, safeProtocol, safePayload);
+            } catch (Throwable t) {
+                Log.w(TAG, scoped("script message listener failed"), t);
+            }
         }
     }
 

@@ -13,6 +13,9 @@ typedef char *(*edge_provision_device_owner_fn)(const char *, int, const char *)
 typedef void (*edge_adb_unreachable_cb)(void);
 typedef void (*edge_register_adb_unreachable_fn)(edge_adb_unreachable_cb);
 typedef char *(*edge_set_adb_proxy_target_fn)(const char *, int);
+typedef void (*edge_script_message_cb)(const char *, const char *, const char *);
+typedef void (*edge_register_script_message_fn)(edge_script_message_cb);
+typedef char *(*edge_send_script_message_fn)(const char *, const char *, const char *);
 
 static const char *kGoLibraryName = "libedgejoin.so";
 
@@ -21,6 +24,7 @@ static const char *kGoLibraryName = "libedgejoin.so";
 static JavaVM *g_vm = NULL;
 static jclass g_bridge_class = NULL;
 static jmethodID g_on_adb_unreachable_mid = NULL;
+static jmethodID g_on_script_message_mid = NULL;
 
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
     (void) reserved;
@@ -38,6 +42,9 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
         if (g_bridge_class != NULL) {
             g_on_adb_unreachable_mid = (*env)->GetStaticMethodID(
                     env, g_bridge_class, "onAdbUnreachableFromNative", "()V");
+            g_on_script_message_mid = (*env)->GetStaticMethodID(
+                    env, g_bridge_class, "onScriptMessageFromNative",
+                    "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V");
         }
     }
     if ((*env)->ExceptionCheck(env)) {
@@ -66,6 +73,46 @@ static void on_adb_unreachable_native(void) {
     }
 
     (*env)->CallStaticVoidMethod(env, g_bridge_class, g_on_adb_unreachable_mid);
+    if ((*env)->ExceptionCheck(env)) {
+        (*env)->ExceptionClear(env);
+    }
+
+    if (attached) {
+        (*g_vm)->DetachCurrentThread(g_vm);
+    }
+}
+
+// Invoked from a Go goroutine thread when a script-message stream arrives.
+// Attaches to JVM and forwards message to EdgeJoinBridge.onScriptMessageFromNative.
+static void on_script_message_native(const char *peer_id, const char *protocol, const char *payload) {
+    if (g_vm == NULL || g_bridge_class == NULL || g_on_script_message_mid == NULL) {
+        return;
+    }
+
+    JNIEnv *env = NULL;
+    bool attached = false;
+    jint getEnv = (*g_vm)->GetEnv(g_vm, (void **) &env, JNI_VERSION_1_6);
+    if (getEnv == JNI_EDETACHED || env == NULL) {
+        if ((*g_vm)->AttachCurrentThread(g_vm, &env, NULL) != JNI_OK || env == NULL) {
+            return;
+        }
+        attached = true;
+    } else if (getEnv != JNI_OK) {
+        return;
+    }
+
+    jstring jPeer = (*env)->NewStringUTF(env, peer_id != NULL ? peer_id : "");
+    jstring jProtocol = (*env)->NewStringUTF(env, protocol != NULL ? protocol : "");
+    jstring jPayload = (*env)->NewStringUTF(env, payload != NULL ? payload : "");
+
+    if (jPeer != NULL && jProtocol != NULL && jPayload != NULL) {
+        (*env)->CallStaticVoidMethod(env, g_bridge_class, g_on_script_message_mid, jPeer, jProtocol, jPayload);
+    }
+
+    if (jPeer != NULL) (*env)->DeleteLocalRef(env, jPeer);
+    if (jProtocol != NULL) (*env)->DeleteLocalRef(env, jProtocol);
+    if (jPayload != NULL) (*env)->DeleteLocalRef(env, jPayload);
+
     if ((*env)->ExceptionCheck(env)) {
         (*env)->ExceptionClear(env);
     }
@@ -392,6 +439,76 @@ Java_org_autojs_autojs_runtime_api_EdgeJoinBridge_nativeSetAdbProxyTarget(
     char *response = edge_set_target(native_host, (int) port);
 
     release_utf(env, host, release_host);
+
+    jstring output;
+    if (response == NULL) {
+        output = make_error(env, "{\"ok\":false,\"status_code\":0,\"error\":\"native response is null\"}");
+    } else {
+        output = (*env)->NewStringUTF(env, response);
+        edge_join_free(response);
+    }
+
+    dlclose(handle);
+    return output;
+}
+
+JNIEXPORT jstring JNICALL
+Java_org_autojs_autojs_runtime_api_EdgeJoinBridge_nativeRegisterScriptMessageCallback(
+        JNIEnv *env,
+        jclass clazz) {
+    (void) clazz;
+
+    void *handle = open_go_library(env);
+    if (handle == NULL) {
+        return make_error(env, "{\"ok\":false,\"status_code\":0,\"error\":\"failed to open libedgejoin.so\"}");
+    }
+
+    edge_register_script_message_fn edge_register =
+            (edge_register_script_message_fn) dlsym(handle, "EdgeRegisterScriptMessageCallback");
+    if (edge_register == NULL) {
+        dlclose(handle);
+        return make_error(env, "{\"ok\":false,\"status_code\":0,\"error\":\"failed to resolve Go symbol EdgeRegisterScriptMessageCallback\"}");
+    }
+
+    edge_register(&on_script_message_native);
+    dlclose(handle);
+    return (*env)->NewStringUTF(env, "{\"ok\":true,\"status_code\":200,\"state\":\"registered\"}");
+}
+
+JNIEXPORT jstring JNICALL
+Java_org_autojs_autojs_runtime_api_EdgeJoinBridge_nativeSendScriptMessage(
+        JNIEnv *env,
+        jclass clazz,
+        jstring peer_id,
+        jstring protocol,
+        jstring payload) {
+    (void) clazz;
+
+    void *handle = open_go_library(env);
+    if (handle == NULL) {
+        return make_error(env, "{\"ok\":false,\"status_code\":0,\"error\":\"failed to open libedgejoin.so\"}");
+    }
+
+    edge_send_script_message_fn edge_send =
+            (edge_send_script_message_fn) dlsym(handle, "EdgeSendScriptMessage");
+    edge_join_free_fn edge_join_free = (edge_join_free_fn) dlsym(handle, "EdgeJoinFree");
+    if (edge_send == NULL || edge_join_free == NULL) {
+        dlclose(handle);
+        return make_error(env, "{\"ok\":false,\"status_code\":0,\"error\":\"failed to resolve Go symbols\"}");
+    }
+
+    const char *release_peer = NULL;
+    const char *release_protocol = NULL;
+    const char *release_payload = NULL;
+    const char *native_peer = get_utf_or_empty(env, peer_id, &release_peer);
+    const char *native_protocol = get_utf_or_empty(env, protocol, &release_protocol);
+    const char *native_payload = get_utf_or_empty(env, payload, &release_payload);
+
+    char *response = edge_send(native_peer, native_protocol, native_payload);
+
+    release_utf(env, peer_id, release_peer);
+    release_utf(env, protocol, release_protocol);
+    release_utf(env, payload, release_payload);
 
     jstring output;
     if (response == NULL) {
