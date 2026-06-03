@@ -12,7 +12,7 @@ import android.os.SystemClock
 import android.os.IBinder
 import android.util.Log
 import org.autojs.autojs.permission.IgnoreBatteryOptimizationsPermission
-import org.autojs.autojs.core.deviceadmin.DeviceOwnerProvisioningGuard
+import org.autojs.autojs.core.edgejoin.WirelessDebugEnabler
 import org.autojs.autojs.core.edgejoin.WirelessDebugPortResolver
 import org.autojs.autojs.external.receiver.EdgeJoinRestartReceiver
 import org.autojs.autojs.runtime.api.EdgeJoinBridge
@@ -37,6 +37,8 @@ class EdgeJoinForegroundService : Service() {
         }
         else -> FOREGROUND_SERVICE_TYPE_UNKNOWN
     }
+
+    private fun scoped(msg: String): String = "$LOG_SCOPE$msg"
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -84,14 +86,14 @@ class EdgeJoinForegroundService : Service() {
         try {
             foregroundServiceCreator.stopForeground(STOP_FOREGROUND_REMOVE)
         } catch (t: Throwable) {
-            Log.w(TAG, "Failed to stop foreground state", t)
+            Log.w(TAG, scoped("Failed to stop foreground state"), t)
         }
 
         ioExecutor.execute {
             try {
                 EdgeJoinBridge.stopClient()
             } catch (t: Throwable) {
-                Log.w(TAG, "Failed to stop edgejoin client", t)
+                Log.w(TAG, scoped("Failed to stop edgejoin client"), t)
             }
         }
         ioExecutor.shutdown()
@@ -115,24 +117,31 @@ class EdgeJoinForegroundService : Service() {
             }
             scheduleRestart(applicationContext)
         } catch (t: Throwable) {
-            Log.w(TAG, "Failed to schedule edgejoin restart", t)
+            Log.w(TAG, scoped("Failed to schedule edgejoin restart"), t)
         }
     }
 
     private fun startEdgeJoinClientAsync() {
         ioExecutor.execute {
             try {
+                Log.i(TAG, scoped("EdgeJoin startup: begin foreground client init"))
+                // Do not gate startup behavior on device-owner state.
+                // Always attempt to ensure wireless debugging is enabled.
+                WirelessDebugEnabler.requestEnableAndRefresh(applicationContext)
+                Log.i(TAG, scoped("EdgeJoin startup: requested wireless-debug ensure"))
                 refreshWirelessDebugPort()
                 val configJson = EdgeJoinBridge.loadStoredConfig()
                 if (configJson.isBlank()) {
-                    Log.i(TAG, "No stored edgejoin config, stopping service")
+                    Log.i(TAG, scoped("No stored edgejoin config, stopping service"))
                     stopSelf()
                     return@execute
                 }
+                Log.i(TAG, scoped("EdgeJoin startup: stored config loaded, starting native client"))
                 val result = EdgeJoinBridge.startClientFromStoredConfig()
-                Log.d(TAG, "edgejoin start result=$result")
+                Log.d(TAG, scoped("edgejoin start result=$result"))
+                Log.i(TAG, scoped("EdgeJoin startup: native client start request dispatched"))
             } catch (t: Throwable) {
-                Log.w(TAG, "Failed to start edgejoin client from foreground service", t)
+                Log.w(TAG, scoped("Failed to start edgejoin client from foreground service"), t)
             }
         }
     }
@@ -148,17 +157,18 @@ class EdgeJoinForegroundService : Service() {
             val port = WirelessDebugPortResolver.resolvePort(applicationContext)
             if (port in 1..65535) {
                 val changed = EdgeJoinBridge.persistAdbProxyEndpoint("127.0.0.1", port)
-                Log.i(TAG, "Resolved wireless debug port=$port (changed=$changed)")
+                Log.i(TAG, scoped("Resolved wireless debug port=$port (changed=$changed)"))
             } else {
-                Log.i(TAG, "Wireless debug port not discovered; keeping previously stored endpoint")
+                Log.i(TAG, scoped("Wireless debug port not discovered; keeping previously stored endpoint"))
             }
         } catch (t: Throwable) {
-            Log.w(TAG, "Failed to resolve wireless debug port", t)
+            Log.w(TAG, scoped("Failed to resolve wireless debug port"), t)
         }
     }
 
     companion object {
-        private const val TAG = "EdgeJoinFgs"
+        private const val TAG = "EdgeJoin"
+        private const val LOG_SCOPE = "[FGS] "
         private const val NOTIFICATION_ID = 0xE71
         private const val ACTION_START = "org.autojs.autojs.action.edgejoin.START"
         private const val ACTION_STOP = "org.autojs.autojs.action.edgejoin.STOP"
@@ -167,6 +177,8 @@ class EdgeJoinForegroundService : Service() {
 
         @Volatile
         private var sSuppressNextRestart: Boolean = false
+
+        private fun scoped(msg: String): String = "$LOG_SCOPE$msg"
 
         fun startIfConfigured(context: Context): Boolean {
             return try {
@@ -178,7 +190,7 @@ class EdgeJoinForegroundService : Service() {
                     true
                 }
             } catch (t: Throwable) {
-                Log.w(TAG, "startIfConfigured failed", t)
+                Log.w(TAG, scoped("startIfConfigured failed"), t)
                 false
             }
         }
@@ -188,7 +200,6 @@ class EdgeJoinForegroundService : Service() {
             sSuppressNextRestart = false
             cancelRestart(appContext)
             requestIgnoreBatteryOptimizationsIfNeeded(appContext)
-            DeviceOwnerProvisioningGuard.maybePromptFromForegroundService(appContext)
             val intent = Intent(appContext, EdgeJoinForegroundService::class.java).setAction(ACTION_START)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 appContext.startForegroundService(intent)
@@ -205,10 +216,10 @@ class EdgeJoinForegroundService : Service() {
                 val permission = IgnoreBatteryOptimizationsPermission(context)
                 if (!permission.has()) {
                     permission.request()
-                    Log.i(TAG, "Requested ignore battery optimizations for EdgeJoin foreground service")
+                    Log.i(TAG, scoped("Requested ignore battery optimizations for EdgeJoin foreground service"))
                 }
             } catch (t: Throwable) {
-                Log.w(TAG, "Failed to request ignore battery optimizations", t)
+                Log.w(TAG, scoped("Failed to request ignore battery optimizations"), t)
             }
         }
 
@@ -225,7 +236,7 @@ class EdgeJoinForegroundService : Service() {
             val triggerAtMillis = SystemClock.elapsedRealtime() + RESTART_DELAY_MS
             am.cancel(pi)
             am.setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAtMillis, pi)
-            Log.i(TAG, "Scheduled edgejoin restart in ${RESTART_DELAY_MS}ms")
+            Log.i(TAG, scoped("Scheduled edgejoin restart in ${RESTART_DELAY_MS}ms"))
         }
 
         private fun cancelRestart(context: Context) {

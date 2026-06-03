@@ -18,7 +18,7 @@ class EdgeJoinRestartReceiver : BroadcastReceiver() {
     }
 
     companion object {
-        private const val TAG = "EdgeJoinRestartRcvr"
+        private const val TAG = "EdgeJoin"
         const val ACTION_EDGEJOIN_RESTART = "org.autojs.autojs.action.edgejoin.RESTART"
     }
 }

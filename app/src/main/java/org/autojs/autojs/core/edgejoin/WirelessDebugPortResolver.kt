@@ -23,7 +23,7 @@ import java.util.concurrent.atomic.AtomicReference
  */
 object WirelessDebugPortResolver {
 
-    private const val TAG = "WirelessDebugPort"
+    private const val TAG = "EdgeJoin"
     private const val CONNECT_SERVICE_TYPE = "_adb-tls-connect._tcp."
     private const val PAIRING_SERVICE_TYPE = "_adb-tls-pairing._tcp."
     private const val DEFAULT_TIMEOUT_MS = 5_000L

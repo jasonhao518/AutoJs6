@@ -25,7 +25,8 @@ import okhttp3.ResponseBody;
 
 public final class EdgeJoinBridge {
 
-    private static final String TAG = "EdgeJoinBridge";
+    private static final String TAG = "EdgeJoin";
+    private static final String LOG_SCOPE = "[Bridge] ";
 
     private static final String DEFAULT_ENDPOINT = "https://www.edgez.ai/api/join";
     private static final String PREF_NAME = "edgejoin";
@@ -41,6 +42,10 @@ public final class EdgeJoinBridge {
 
     private static final MediaType JSON_MEDIA_TYPE = MediaType.parse("application/json; charset=utf-8");
     private static final OkHttpClient HTTP_CLIENT = new OkHttpClient();
+
+    private static String scoped(String msg) {
+        return LOG_SCOPE + msg;
+    }
 
     static {
         System.loadLibrary("edgejoin_jni");
@@ -72,7 +77,7 @@ public final class EdgeJoinBridge {
         try {
             Context ctx = GlobalAppContext.get();
             if (ctx == null) {
-                Log.w(TAG, "provideScrcpyJarFromAssets: no application context yet");
+                Log.w(TAG, scoped("provideScrcpyJarFromAssets: no application context yet"));
                 return;
             }
             try (InputStream in = ctx.getAssets().open("scrcpy/scrcpy-server.jar");
@@ -84,26 +89,26 @@ public final class EdgeJoinBridge {
                 }
                 byte[] data = out.toByteArray();
                 String resp = nativeProvideScrcpyJar(data);
-                Log.d(TAG, "provideScrcpyJarFromAssets: provided size=" + data.length + " resp=" + resp);
+                Log.d(TAG, scoped("provideScrcpyJarFromAssets: provided size=" + data.length + " resp=" + resp));
             }
         } catch (Throwable t) {
-            Log.w(TAG, "provideScrcpyJarFromAssets: failed to load scrcpy-server.jar from assets", t);
+            Log.w(TAG, scoped("provideScrcpyJarFromAssets: failed to load scrcpy-server.jar from assets"), t);
         }
     }
 
     public static String createIdentity(String name) {
-        Log.d(TAG, "createIdentity: requested with name=" + safeValue(sanitizeName(name)));
+        Log.d(TAG, scoped("createIdentity: requested with name=" + safeValue(sanitizeName(name))));
         return nativeCreateIdentity(sanitizeName(name));
     }
 
     public static String startClientFromStoredConfig() {
         String configJson = loadStoredConfig();
-        Log.d(TAG, "startClientFromStoredConfig: configLen=" + configJson.length());
+        Log.d(TAG, scoped("startClientFromStoredConfig: configLen=" + configJson.length()));
         return nativeStartClient(configJson);
     }
 
     public static String stopClient() {
-        Log.d(TAG, "stopClient: requested");
+        Log.d(TAG, scoped("stopClient: requested"));
         return nativeStopClient();
     }
 
@@ -361,7 +366,7 @@ public final class EdgeJoinBridge {
         if (port < 1 || port > 65535) {
             return buildErrorResult("invalid adb proxy port: " + port, 0);
         }
-        Log.d(TAG, "setAdbProxyTarget: host=" + safeValue(normalizedHost) + ", port=" + port);
+        Log.d(TAG, scoped("setAdbProxyTarget: host=" + safeValue(normalizedHost) + ", port=" + port));
         return nativeSetAdbProxyTarget(normalizedHost, port);
     }
 
@@ -375,16 +380,16 @@ public final class EdgeJoinBridge {
      */
     @Keep
     public static void onAdbUnreachableFromNative() {
-        Log.i(TAG, "onAdbUnreachableFromNative: native reported adb unreachable, re-enabling wireless debug");
+        Log.i(TAG, scoped("onAdbUnreachableFromNative: native reported adb unreachable, re-enabling wireless debug"));
         try {
             Context context = GlobalAppContext.get();
             if (context == null) {
-                Log.w(TAG, "onAdbUnreachableFromNative: no application context");
+                Log.w(TAG, scoped("onAdbUnreachableFromNative: no application context"));
                 return;
             }
             WirelessDebugEnabler.requestEnableAndRefresh(context.getApplicationContext());
         } catch (Throwable t) {
-            Log.w(TAG, "onAdbUnreachableFromNative: failed to dispatch re-enable", t);
+            Log.w(TAG, scoped("onAdbUnreachableFromNative: failed to dispatch re-enable"), t);
         }
     }
 

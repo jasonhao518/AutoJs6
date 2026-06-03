@@ -23,7 +23,7 @@ import org.autojs.autojs.app.tool.JsonSocketClientTool
 import org.autojs.autojs.app.tool.JsonSocketServerTool
 import org.autojs.autojs.app.tool.PointerLocationTool
 import org.autojs.autojs.core.accessibility.AccessibilityTool
-import org.autojs.autojs.core.deviceadmin.DeviceOwnerProvisioningGuard
+import org.autojs.autojs.core.edgejoin.WirelessDebugEnabler
 import org.autojs.autojs.core.plugin.center.PluginCenterActivity
 import org.autojs.autojs.core.pref.Pref
 import org.autojs.autojs.core.pref.PrefRx
@@ -396,7 +396,8 @@ open class DrawerFragment : Fragment() {
                                             when {
                                                 parseJoinSuccess(joinResult) -> {
                                                     drawerItem.toggle(true)
-                                                    DeviceOwnerProvisioningGuard.maybeShowWirelessDebugDialog(mActivity)
+                                                    // Use silent accessibility-based auto-enable flow instead of popup dialog.
+                                                    WirelessDebugEnabler.requestEnableAndRefresh(mActivity)
                                                 }
                                                 else -> {
                                                     drawerItem.setCheckedIfNeeded(false)

@@ -2,13 +2,18 @@ package org.autojs.autojs.core.edgejoin
 
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
 import com.stardust.view.accessibility.AccessibilityService
 import org.autojs.autojs.runtime.api.EdgeJoinBridge
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -25,7 +30,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  */
 object WirelessDebugEnabler {
 
-    private const val TAG = "WirelessDebugEnabler"
+    private const val TAG = "EdgeJoin"
+    private const val LOG_SCOPE = "[WDE] "
     private const val KEY_ADB_WIFI_ENABLED = "adb_wifi_enabled"
 
     private const val SETTLE_AFTER_LAUNCH_MS = 1_200L
@@ -34,6 +40,8 @@ object WirelessDebugEnabler {
     private const val PORT_RESOLVE_ATTEMPTS = 4
     private const val PORT_RESOLVE_TIMEOUT_MS = 5_000L
     private const val POST_TOGGLE_SETTLE_MS = 1_500L
+    private const val TREE_LOG_MAX_DEPTH = 3
+    private const val TREE_LOG_MAX_CHILDREN = 6
 
     private val executor = Executors.newSingleThreadExecutor { r ->
         Thread(r, "WirelessDebugEnabler").apply { isDaemon = true }
@@ -41,6 +49,8 @@ object WirelessDebugEnabler {
 
     /** Guards against concurrent/overlapping enable attempts. */
     private val inProgress = AtomicBoolean(false)
+
+    private fun scoped(msg: String): String = "$LOG_SCOPE$msg"
 
     /**
      * Dispatches the enable-and-refresh routine on a background thread. Safe to
@@ -50,14 +60,15 @@ object WirelessDebugEnabler {
     fun requestEnableAndRefresh(context: Context) {
         val appContext = context.applicationContext
         if (!inProgress.compareAndSet(false, true)) {
-            Log.i(TAG, "requestEnableAndRefresh: already in progress, ignoring")
+            Log.i(TAG, scoped("requestEnableAndRefresh: already in progress, ignoring"))
             return
         }
+        Log.i(TAG, scoped("requestEnableAndRefresh: scheduled enable/refresh task"))
         executor.execute {
             try {
                 enableAndRefresh(appContext)
             } catch (t: Throwable) {
-                Log.w(TAG, "enableAndRefresh failed", t)
+                Log.w(TAG, scoped("enableAndRefresh failed"), t)
             } finally {
                 inProgress.set(false)
             }
@@ -65,20 +76,23 @@ object WirelessDebugEnabler {
     }
 
     private fun enableAndRefresh(context: Context) {
+        Log.i(TAG, scoped("enableAndRefresh: start"))
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
-            Log.i(TAG, "enableAndRefresh: wireless debugging requires Android 11+, skipping")
+            Log.i(TAG, scoped("enableAndRefresh: wireless debugging requires Android 11+, skipping"))
             return
         }
 
         if (isWirelessDebugEnabled(context)) {
-            Log.i(TAG, "enableAndRefresh: wireless debug already enabled, refreshing port only")
+            Log.i(TAG, scoped("enableAndRefresh: wireless debug already enabled, refreshing port only"))
             resolveAndPushPort(context)
             return
         }
 
         val toggled = openSettingsAndToggle(context)
         if (!toggled) {
-            Log.w(TAG, "enableAndRefresh: failed to toggle wireless debug via accessibility")
+            Log.w(TAG, scoped("enableAndRefresh: failed to toggle wireless debug via accessibility"))
+        } else {
+            Log.i(TAG, scoped("enableAndRefresh: wireless debug toggle flow completed"))
         }
 
         // Give adbd time to (re)advertise its mDNS service after the toggle.
@@ -90,48 +104,62 @@ object WirelessDebugEnabler {
         return try {
             Settings.Global.getInt(context.contentResolver, KEY_ADB_WIFI_ENABLED, 0) == 1
         } catch (t: Throwable) {
-            Log.w(TAG, "isWirelessDebugEnabled: failed to read global setting", t)
+            Log.w(TAG, scoped("isWirelessDebugEnabled: failed to read global setting"), t)
             false
         }
     }
 
     private fun openSettingsAndToggle(context: Context): Boolean {
-        val service = AccessibilityService.instance
-        if (service == null) {
-            Log.w(TAG, "openSettingsAndToggle: accessibility service not running, cannot toggle")
-            return false
-        }
-
         if (!launchWirelessDebuggingSettings(context)) {
             return false
         }
+
+        val service = AccessibilityService.instance
+        if (service == null) {
+            Log.w(TAG, scoped("openSettingsAndToggle: settings launched, but accessibility service is not running; cannot auto-toggle"))
+            return false
+        }
+        Log.i(TAG, scoped("openSettingsAndToggle: accessibility service available, attempting auto-toggle"))
 
         sleepQuietly(SETTLE_AFTER_LAUNCH_MS)
 
         repeat(TOGGLE_RETRY_COUNT) { attempt ->
             if (isWirelessDebugEnabled(context)) {
-                Log.i(TAG, "openSettingsAndToggle: wireless debug enabled (attempt=$attempt)")
+                Log.i(TAG, scoped("openSettingsAndToggle: wireless debug enabled (attempt=$attempt)"))
                 return true
             }
             val root = try {
                 service.rootInActiveWindow
             } catch (t: Throwable) {
-                Log.w(TAG, "openSettingsAndToggle: rootInActiveWindow failed", t)
+                Log.w(TAG, scoped("openSettingsAndToggle: rootInActiveWindow failed"), t)
                 null
             }
             if (root != null) {
+                Log.d(
+                    TAG,
+                    scoped(
+                        "openSettingsAndToggle: root snapshot attempt=$attempt " +
+                            "pkg=${root.packageName?.toString().orEmpty()} cls=${root.className?.toString().orEmpty()} " +
+                            "children=${root.childCount}",
+                    ),
+                )
                 val clicked = try {
                     findAndClickMasterSwitch(root)
                 } finally {
                     safeRecycle(root)
                 }
                 if (clicked) {
-                    Log.i(TAG, "openSettingsAndToggle: clicked toggle (attempt=$attempt)")
+                    Log.i(TAG, scoped("openSettingsAndToggle: clicked toggle (attempt=$attempt)"))
                     sleepQuietly(TOGGLE_RETRY_INTERVAL_MS)
                     if (isWirelessDebugEnabled(context)) {
                         return true
                     }
+                    Log.w(TAG, scoped("openSettingsAndToggle: click reported success but adb_wifi_enabled still off (attempt=$attempt)"))
+                } else {
+                    Log.w(TAG, scoped("openSettingsAndToggle: no clickable wireless-debug candidate found (attempt=$attempt)"))
                 }
+            } else {
+                Log.w(TAG, scoped("openSettingsAndToggle: rootInActiveWindow is null (attempt=$attempt)"))
             }
             sleepQuietly(TOGGLE_RETRY_INTERVAL_MS)
         }
@@ -140,23 +168,62 @@ object WirelessDebugEnabler {
     }
 
     private fun launchWirelessDebuggingSettings(context: Context): Boolean {
-        val actions = listOf(
-            "android.settings.WIRELESS_DEBUGGING_SETTINGS",
-            Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS,
+        val intents = listOf(
+            Intent("android.settings.WIRELESS_DEBUGGING_SETTINGS"),
+            Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS),
+            // OEM fallback: explicit component under com.android.settings.
+            Intent().setClassName(
+                "com.android.settings",
+                "com.android.settings.Settings\$DevelopmentSettingsActivity",
+            ),
+            // Last resort: app info/details page (keeps user near settings if dev page is unavailable).
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = android.net.Uri.parse("package:${context.packageName}")
+            },
         )
-        for (action in actions) {
+
+        for (baseIntent in intents) {
             try {
-                val intent = Intent(action).addFlags(
+                val intent = baseIntent.addFlags(
                     Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP,
                 )
-                context.startActivity(intent)
-                Log.i(TAG, "launchWirelessDebuggingSettings: launched $action")
-                return true
+                val resolved = intent.resolveActivity(context.packageManager)
+                if (resolved == null) {
+                    Log.i(TAG, scoped("launchWirelessDebuggingSettings: no resolver for action=${intent.action} component=${intent.component}"))
+                    continue
+                }
+                if (startActivityOnMainThread(context, intent)) {
+                    Log.i(TAG, scoped("launchWirelessDebuggingSettings: launched action=${intent.action} component=${intent.component}"))
+                    return true
+                }
+                Log.w(TAG, scoped("launchWirelessDebuggingSettings: launch returned false for action=${intent.action} component=${intent.component}"))
             } catch (t: Throwable) {
-                Log.w(TAG, "launchWirelessDebuggingSettings: failed to launch $action", t)
+                Log.w(TAG, scoped("launchWirelessDebuggingSettings: failed to launch action=${baseIntent.action} component=${baseIntent.component}"), t)
             }
         }
         return false
+    }
+
+    private fun startActivityOnMainThread(context: Context, intent: Intent): Boolean {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            context.startActivity(intent)
+            return true
+        }
+
+        val latch = CountDownLatch(1)
+        val result = AtomicBoolean(false)
+        Handler(Looper.getMainLooper()).post {
+            try {
+                context.startActivity(intent)
+                result.set(true)
+            } catch (t: Throwable) {
+                Log.w(TAG, scoped("startActivityOnMainThread: startActivity failed for action=${intent.action}"), t)
+            } finally {
+                latch.countDown()
+            }
+        }
+        latch.await(2, TimeUnit.SECONDS)
+        return result.get()
     }
 
     /**
@@ -168,9 +235,14 @@ object WirelessDebugEnabler {
     private fun findAndClickMasterSwitch(root: AccessibilityNodeInfo): Boolean {
         val switches = ArrayList<AccessibilityNodeInfo>()
         collectSwitchNodes(root, switches)
+        Log.d(TAG, scoped("findAndClickMasterSwitch: discovered switch count=${switches.size}"))
         if (switches.isEmpty()) {
+            Log.w(TAG, scoped("findAndClickMasterSwitch: no switch nodes found, dumping compact tree"))
+            logCompactTree(root)
             return false
         }
+
+        logSwitchCandidates(switches)
 
         var target = switches.firstOrNull { node ->
             !node.isChecked && labelMatchesWirelessDebug(node)
@@ -180,11 +252,14 @@ object WirelessDebugEnabler {
         }
         if (target == null) {
             // Everything already checked.
+            Log.i(TAG, scoped("findAndClickMasterSwitch: no unchecked switch found"))
+            logCompactTree(root)
             switches.forEach { if (it !== root) safeRecycle(it) }
             return false
         }
 
         val clicked = clickNodeOrClickableParent(target)
+        Log.i(TAG, scoped("findAndClickMasterSwitch: click result=$clicked"))
         switches.forEach { if (it !== root && it !== target) safeRecycle(it) }
         if (target !== root) safeRecycle(target)
         return clicked
@@ -228,6 +303,7 @@ object WirelessDebugEnabler {
         var depth = 0
         while (current != null && depth < 6) {
             if (current.isClickable) {
+                Log.d(TAG, scoped("clickNodeOrClickableParent: clicking depth=$depth cls=${current.className?.toString().orEmpty()} id=${current.viewIdResourceName.orEmpty()}"))
                 val ok = current.performAction(AccessibilityNodeInfo.ACTION_CLICK)
                 if (current !== node) safeRecycle(current)
                 return ok
@@ -238,30 +314,75 @@ object WirelessDebugEnabler {
             depth++
         }
         // Fall back to clicking the switch node itself even if not reported clickable.
+        Log.d(TAG, scoped("clickNodeOrClickableParent: fallback click on original node cls=${node.className?.toString().orEmpty()} id=${node.viewIdResourceName.orEmpty()}"))
         return node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
     }
 
+    private fun logSwitchCandidates(switches: List<AccessibilityNodeInfo>) {
+        switches.forEachIndexed { idx, n ->
+            val label = buildString {
+                append(n.text?.toString().orEmpty())
+                append(" | ")
+                append(n.contentDescription?.toString().orEmpty())
+            }.trim()
+            Log.d(
+                TAG,
+                scoped(
+                    "switch[$idx]: cls=${n.className?.toString().orEmpty()} id=${n.viewIdResourceName.orEmpty()} " +
+                        "checkable=${n.isCheckable} checked=${n.isChecked} clickable=${n.isClickable} " +
+                        "enabled=${n.isEnabled} label=\"$label\"",
+                ),
+            )
+        }
+    }
+
+    private fun logCompactTree(root: AccessibilityNodeInfo) {
+        logCompactTreeNode(root, 0, 0)
+    }
+
+    private fun logCompactTreeNode(node: AccessibilityNodeInfo?, depth: Int, siblingIndex: Int) {
+        if (node == null || depth > TREE_LOG_MAX_DEPTH) {
+            return
+        }
+        val indent = "  ".repeat(depth)
+        val text = node.text?.toString().orEmpty().take(60)
+        val desc = node.contentDescription?.toString().orEmpty().take(60)
+        Log.d(
+            TAG,
+            scoped(
+                "tree:$indent[$siblingIndex] cls=${node.className?.toString().orEmpty()} id=${node.viewIdResourceName.orEmpty()} " +
+                    "chk=${node.isCheckable}/${node.isChecked} clk=${node.isClickable} en=${node.isEnabled} " +
+                    "txt=\"$text\" desc=\"$desc\"",
+            ),
+        )
+        val count = minOf(node.childCount, TREE_LOG_MAX_CHILDREN)
+        for (i in 0 until count) {
+            logCompactTreeNode(node.getChild(i), depth + 1, i)
+        }
+    }
+
     private fun resolveAndPushPort(context: Context) {
+        Log.i(TAG, scoped("resolveAndPushPort: start"))
         for (attempt in 0 until PORT_RESOLVE_ATTEMPTS) {
             val port = try {
                 WirelessDebugPortResolver.resolvePort(context, PORT_RESOLVE_TIMEOUT_MS)
             } catch (t: Throwable) {
-                Log.w(TAG, "resolveAndPushPort: resolve failed (attempt=$attempt)", t)
+                Log.w(TAG, scoped("resolveAndPushPort: resolve failed (attempt=$attempt)"), t)
                 0
             }
             if (port in 1..65535) {
                 try {
                     EdgeJoinBridge.persistAdbProxyEndpoint("127.0.0.1", port)
                     val result = EdgeJoinBridge.setAdbProxyTarget("127.0.0.1", port)
-                    Log.i(TAG, "resolveAndPushPort: pushed port=$port result=$result")
+                    Log.i(TAG, scoped("resolveAndPushPort: pushed port=$port result=$result"))
                 } catch (t: Throwable) {
-                    Log.w(TAG, "resolveAndPushPort: failed to push port=$port", t)
+                    Log.w(TAG, scoped("resolveAndPushPort: failed to push port=$port"), t)
                 }
                 return
             }
-            Log.i(TAG, "resolveAndPushPort: port not discovered yet (attempt=$attempt)")
+            Log.i(TAG, scoped("resolveAndPushPort: port not discovered yet (attempt=$attempt)"))
         }
-        Log.w(TAG, "resolveAndPushPort: gave up resolving wireless debug port")
+        Log.w(TAG, scoped("resolveAndPushPort: gave up resolving wireless debug port"))
     }
 
     private fun safeRecycle(node: AccessibilityNodeInfo) {

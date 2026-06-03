@@ -25,6 +25,7 @@ import org.autojs.autojs.app.OnActivityResultDelegate
 import org.autojs.autojs.app.OnActivityResultDelegate.DelegateHost
 import org.autojs.autojs.core.accessibility.AccessibilityTool
 import org.autojs.autojs.core.deviceadmin.DeviceOwnerProvisioningGuard
+import org.autojs.autojs.core.edgejoin.WirelessDebugEnabler
 import org.autojs.autojs.core.permission.RequestPermissionCallbacks
 import org.autojs.autojs.core.pref.Pref
 import org.autojs.autojs.event.BackPressedHandler
@@ -207,8 +208,9 @@ class MainActivity : BaseActivity(), DelegateHost, HostActivity {
     override fun onStart() {
         super.onStart()
         keepAppRunningInBackgroundIfEnabled()
-        val forceOpenPairInput = DeviceOwnerProvisioningGuard.consumeOpenPairInputFlag(this)
-        DeviceOwnerProvisioningGuard.maybeShowWirelessDebugDialog(this, forceOpenPairInput)
+        DeviceOwnerProvisioningGuard.consumeOpenPairInputFlag(this)
+        // Use silent accessibility-based auto-enable flow instead of popup dialog.
+        WirelessDebugEnabler.requestEnableAndRefresh(this)
         // @Hint by SuperMonster003 on Dec 24, 2025.
         //  ! Avoid binding Shizuku user service on app start.
         //  ! It may spawn root user-service processes repeatedly during IDE "Run" (force-stop + relaunch).

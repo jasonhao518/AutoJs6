@@ -194,7 +194,7 @@ class EdgeJoinPairingActionReceiver : BroadcastReceiver() {
     }
 
     companion object {
-        private const val TAG = "EdgeJoinPairAction"
+        private const val TAG = "EdgeJoin"
         private const val PREF_EDGEJOIN = "edgejoin"
         private const val KEY_ADB_PROXY_HOST = "adb_proxy_host"
         private const val KEY_ADB_PROXY_PORT = "adb_proxy_port"

@@ -376,7 +376,7 @@ class WirelessAdbPairingService : Service() {
 
     companion object {
 
-        private const val TAG = "WirelessAdbPairing"
+        private const val TAG = "EdgeJoin"
 
         const val NOTIFICATION_CHANNEL = "adb_pairing"
         private const val NOTIFICATION_ID = 0xE743
