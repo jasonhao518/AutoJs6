@@ -1,10 +1,13 @@
 package org.autojs.autojs.external.foreground
 
+import android.annotation.SuppressLint
 import android.app.Service
 import android.content.Intent
+import android.net.wifi.WifiManager
 import android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import org.autojs.autojs.AbstractAutoJs.Companion.isInrt
 import org.autojs.autojs.tool.ForegroundServiceCreator
 import org.autojs.autojs.ui.main.MainActivity
@@ -19,6 +22,8 @@ import org.autojs.autojs.inrt.LogActivity as LogActivityInrt
 class AppForegroundService : Service() {
 
     private lateinit var mForegroundServiceCreator: ForegroundServiceCreator
+    private var mCpuWakeLock: PowerManager.WakeLock? = null
+    private var mWifiLock: WifiManager.WifiLock? = null
 
     private val mForegroundServiceType = when {
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE -> {
@@ -51,11 +56,54 @@ class AppForegroundService : Service() {
             .setNotificationContent(getString(R.string.foreground_notification_text, label))
             .create()
             .apply { startForeground(mForegroundServiceType) }
+
+        acquireKeepAliveLocks()
     }
 
     override fun onDestroy() {
+        releaseKeepAliveLocks()
         mForegroundServiceCreator.stopForeground(STOP_FOREGROUND_REMOVE)
         super.onDestroy()
+    }
+
+    @Suppress("DEPRECATION")
+    @SuppressLint("WakelockTimeout")
+    private fun acquireKeepAliveLocks() {
+        val wakeLockTag = "${javaClass.name}:cpu"
+        mCpuWakeLock = (getSystemService(POWER_SERVICE) as? PowerManager)
+            ?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, wakeLockTag)
+            ?.apply {
+                setReferenceCounted(false)
+                if (!isHeld) {
+                    acquire()
+                }
+            }
+
+        val wifiLockTag = "${javaClass.name}:wifi"
+        mWifiLock = (applicationContext.getSystemService(WIFI_SERVICE) as? WifiManager)
+            ?.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, wifiLockTag)
+            ?.apply {
+                setReferenceCounted(false)
+                if (!isHeld) {
+                    acquire()
+                }
+            }
+    }
+
+    private fun releaseKeepAliveLocks() {
+        mWifiLock?.runCatching {
+            if (isHeld) {
+                release()
+            }
+        }
+        mWifiLock = null
+
+        mCpuWakeLock?.runCatching {
+            if (isHeld) {
+                release()
+            }
+        }
+        mCpuWakeLock = null
     }
 
     companion object {
