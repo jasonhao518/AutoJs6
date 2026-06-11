@@ -1,6 +1,7 @@
 package org.autojs.autojs.core.deviceadmin
 
 import android.app.Activity
+import android.app.admin.DevicePolicyManager
 import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
@@ -17,11 +18,15 @@ import org.autojs.autojs.util.IntentUtils
 import org.autojs.autojs.util.IntentUtils.startSafely
 import org.autojs.autojs.util.ViewUtils
 import org.autojs.autojs6.R
+import java.net.InetSocketAddress
+import java.net.Socket
 
 object DeviceOwnerProvisioningGuard {
 
     private const val TAG = "DeviceOwnerGuard"
     private const val KEY_ADB_WIFI_ENABLED = "adb_wifi_enabled"
+    private const val LEGACY_ADB_TCP_PORT = 5555
+    private const val LOCAL_PORT_CHECK_TIMEOUT_MS = 600
     private const val PROMPT_MIN_INTERVAL_MS = 30_000L
     private const val PREF_EDGEJOIN = "edgejoin"
     private const val KEY_ADB_PROXY_HOST = "adb_proxy_host"
@@ -37,10 +42,35 @@ object DeviceOwnerProvisioningGuard {
     private var sLastPromptUptimeMs = 0L
 
     fun isWirelessDebugEnabled(context: Context): Boolean {
-        return try {
+        val enabledBySetting = try {
             Settings.Global.getInt(context.contentResolver, KEY_ADB_WIFI_ENABLED, 0) == 1
         } catch (t: Throwable) {
             Log.w(TAG, "isWirelessDebugEnabled: failed to read global setting", t)
+            false
+        }
+        if (enabledBySetting) {
+            return true
+        }
+        return isLocalPortReachable(LEGACY_ADB_TCP_PORT)
+    }
+
+    private fun isLocalPortReachable(port: Int): Boolean {
+        return try {
+            Socket().use { socket ->
+                socket.connect(InetSocketAddress("127.0.0.1", port), LOCAL_PORT_CHECK_TIMEOUT_MS)
+                true
+            }
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    private fun isDeviceOwnerApp(context: Context): Boolean {
+        return try {
+            val dpm = context.getSystemService(DevicePolicyManager::class.java) ?: return false
+            dpm.isDeviceOwnerApp(context.packageName)
+        } catch (t: Throwable) {
+            Log.w(TAG, "isDeviceOwnerApp: failed to query device-owner state", t)
             false
         }
     }
@@ -69,6 +99,9 @@ object DeviceOwnerProvisioningGuard {
 
     fun maybeHandleOnAppOpened(activity: Activity) {
         if (!isEdgeJoinConfigured(activity)) {
+            return
+        }
+        if (!isDeviceOwnerApp(activity)) {
             return
         }
         if (activity.isFinishing || activity.isDestroyed) {
@@ -122,6 +155,9 @@ object DeviceOwnerProvisioningGuard {
 
     fun maybePromptFromForegroundService(context: Context) {
         if (!isEdgeJoinConfigured(context) || hasPairingEndpoint(context)) {
+            return
+        }
+        if (!isDeviceOwnerApp(context)) {
             return
         }
 
