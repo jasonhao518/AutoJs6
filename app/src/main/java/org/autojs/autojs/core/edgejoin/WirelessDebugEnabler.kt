@@ -11,6 +11,8 @@ import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
 import com.stardust.view.accessibility.AccessibilityService
 import org.autojs.autojs.runtime.api.EdgeJoinBridge
+import java.net.InetSocketAddress
+import java.net.Socket
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -33,6 +35,8 @@ object WirelessDebugEnabler {
     private const val TAG = "EdgeJoin"
     private const val LOG_SCOPE = "[WDE] "
     private const val KEY_ADB_WIFI_ENABLED = "adb_wifi_enabled"
+    private const val LEGACY_ADB_TCP_PORT = 5555
+    private const val LOCAL_PORT_CHECK_TIMEOUT_MS = 600
 
     private const val SETTLE_AFTER_LAUNCH_MS = 1_200L
     private const val TOGGLE_RETRY_COUNT = 6
@@ -101,12 +105,23 @@ object WirelessDebugEnabler {
     }
 
     private fun isWirelessDebugEnabled(context: Context): Boolean {
-        return try {
+        val enabledBySetting = try {
             Settings.Global.getInt(context.contentResolver, KEY_ADB_WIFI_ENABLED, 0) == 1
         } catch (t: Throwable) {
             Log.w(TAG, scoped("isWirelessDebugEnabled: failed to read global setting"), t)
             false
         }
+        if (enabledBySetting) {
+            return true
+        }
+
+        // Some devices still expose local adbd on tcp/5555 while adb_wifi_enabled
+        // remains off. Treat this as "wireless debug available" for server mode.
+        val enabledByPort = isLocalPortReachable(LEGACY_ADB_TCP_PORT)
+        if (enabledByPort) {
+            Log.i(TAG, scoped("isWirelessDebugEnabled: treating localhost:$LEGACY_ADB_TCP_PORT as enabled wireless debug"))
+        }
+        return enabledByPort
     }
 
     private fun openSettingsAndToggle(context: Context): Boolean {
@@ -382,7 +397,40 @@ object WirelessDebugEnabler {
             }
             Log.i(TAG, scoped("resolveAndPushPort: port not discovered yet (attempt=$attempt)"))
         }
+
+        if (isLocalPortReachable(LEGACY_ADB_TCP_PORT)) {
+            try {
+                EdgeJoinBridge.persistAdbProxyEndpoint("127.0.0.1", LEGACY_ADB_TCP_PORT)
+                val result = EdgeJoinBridge.setAdbProxyTarget("127.0.0.1", LEGACY_ADB_TCP_PORT)
+                Log.i(
+                    TAG,
+                    scoped("resolveAndPushPort: fallback to localhost:$LEGACY_ADB_TCP_PORT result=$result"),
+                )
+                return
+            } catch (t: Throwable) {
+                Log.w(
+                    TAG,
+                    scoped("resolveAndPushPort: failed fallback push to localhost:$LEGACY_ADB_TCP_PORT"),
+                    t,
+                )
+            }
+        }
+
         Log.w(TAG, scoped("resolveAndPushPort: gave up resolving wireless debug port"))
+    }
+
+    private fun isLocalPortReachable(port: Int): Boolean {
+        return try {
+            Socket().use { socket ->
+                socket.connect(
+                    InetSocketAddress("127.0.0.1", port),
+                    LOCAL_PORT_CHECK_TIMEOUT_MS,
+                )
+                true
+            }
+        } catch (_: Throwable) {
+            false
+        }
     }
 
     private fun safeRecycle(node: AccessibilityNodeInfo) {
